@@ -1,0 +1,52 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id             String   @id @default(cuid())
+  email          String   @unique
+  name           String?
+  password       String?
+  tier           String   @default("free")
+  stripeId       String?
+  telegramChatId String?
+  watchlist      Stock[]
+  alerts         Alert[]
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+model Stock {
+  id     String  @id @default(cuid())
+  ticker String
+  userId String
+  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  alerts Alert[]
+
+  @@unique([userId, ticker])
+}
+
+model Alert {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  stockId   String
+  stock     Stock    @relation(fields: [stockId], references: [id], onDelete: Cascade)
+  metric    String
+  condition String
+  threshold Float
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+}
+
+model StockCache {
+  id        String   @id @default(cuid())
+  ticker    String   @unique
+  data      String
+  updatedAt DateTime @updatedAt
+}
