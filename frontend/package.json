@@ -18,7 +18,8 @@
     "react-dom": "^18",
     "recharts": "^3.8.1",
     "resend": "^6.10.0",
-    "stripe": "^22.0.0"
+    "stripe": "^22.0.0",
+    "yahoo-finance2": "^3.14.0"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
