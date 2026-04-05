@@ -37,11 +37,26 @@ export async function getFullValuation(symbol: string): Promise<StockValuation> 
   ]);
 
   // --- DCF Fair Value ---
-  const dcfSources: SourceValue[] = fmpDcfList.map((d) => ({
-    source: d.source,
-    value: Math.round(d.value * 100) / 100,
-    model: d.model,
-  }));
+  const dcfSources: SourceValue[] = [];
+
+  // Yahoo-computed DCF (simple model based on FCF + growth)
+  if (yahooData.dcfValue != null) {
+    dcfSources.push({
+      source: "Yahoo Finance (FCF Model)",
+      value: yahooData.dcfValue,
+      model: "Simple DCF (5yr FCF projection)",
+    });
+  }
+
+  // FMP DCF sources
+  for (const d of fmpDcfList) {
+    dcfSources.push({
+      source: d.source,
+      value: Math.round(d.value * 100) / 100,
+      model: d.model,
+    });
+  }
+
   const dcfValues = dcfSources.map((s) => s.value);
 
   // --- Target Price ---
