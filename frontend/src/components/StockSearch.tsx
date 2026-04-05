@@ -1,15 +1,46 @@
 "use client";
 
 import { useState, useCallback } from "react";
+import { useI18n } from "@/lib/i18n";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 interface StockSearchProps {
   onSearch: (symbols: string[]) => void;
   loading?: boolean;
 }
 
+const POPULAR_STOCKS = [
+  { symbol: "NVDA", name: "英伟达 NVIDIA", category: "AI/芯片" },
+  { symbol: "AAPL", name: "苹果 Apple", category: "科技" },
+  { symbol: "MSFT", name: "微软 Microsoft", category: "科技" },
+  { symbol: "GOOGL", name: "谷歌 Alphabet", category: "科技" },
+  { symbol: "AMZN", name: "亚马逊 Amazon", category: "电商/云" },
+  { symbol: "META", name: "Meta (Facebook)", category: "社交" },
+  { symbol: "TSLA", name: "特斯拉 Tesla", category: "电动车" },
+  { symbol: "TSM", name: "台积电 TSMC", category: "芯片" },
+  { symbol: "AVGO", name: "博通 Broadcom", category: "芯片" },
+  { symbol: "AMD", name: "超威半导体 AMD", category: "芯片" },
+  { symbol: "PLTR", name: "Palantir", category: "AI/数据" },
+  { symbol: "SNOW", name: "Snowflake", category: "云数据" },
+  { symbol: "CRM", name: "Salesforce", category: "SaaS" },
+  { symbol: "NFLX", name: "奈飞 Netflix", category: "流媒体" },
+  { symbol: "COST", name: "Costco 好市多", category: "零售" },
+  { symbol: "LLY", name: "礼来 Eli Lilly", category: "医药" },
+  { symbol: "V", name: "Visa 维萨", category: "金融" },
+  { symbol: "JPM", name: "摩根大通 JPMorgan", category: "银行" },
+  { symbol: "COIN", name: "Coinbase", category: "加密" },
+  { symbol: "SMCI", name: "超微电脑 Super Micro", category: "AI/服务器" },
+];
+
 export default function StockSearch({ onSearch, loading }: StockSearchProps) {
+  const { t } = useI18n();
   const [input, setInput] = useState("");
   const [tags, setTags] = useState<string[]>([]);
+  const [searchQuery, setSearchQuery] = useState("");
 
   const addTag = useCallback(
     (value: string) => {
@@ -25,6 +56,14 @@ export default function StockSearch({ onSearch, loading }: StockSearchProps) {
     setTags((prev) => prev.filter((t) => t !== symbol));
   };
 
+  const togglePopular = (symbol: string) => {
+    if (tags.includes(symbol)) {
+      removeTag(symbol);
+    } else {
+      addTag(symbol);
+    }
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if ((e.key === "Enter" || e.key === "," || e.key === " ") && input.trim()) {
       e.preventDefault();
@@ -38,7 +77,6 @@ export default function StockSearch({ onSearch, loading }: StockSearchProps) {
   };
 
   const handleSubmit = () => {
-    // Also process any remaining input
     if (input.trim()) {
       const parts = input.split(/[,\s]+/).filter(Boolean);
       const newTags = [...tags];
@@ -54,47 +92,130 @@ export default function StockSearch({ onSearch, loading }: StockSearchProps) {
     }
   };
 
+  const filteredStocks = searchQuery
+    ? POPULAR_STOCKS.filter(
+        (s) =>
+          s.symbol.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          s.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          s.category.toLowerCase().includes(searchQuery.toLowerCase())
+      )
+    : POPULAR_STOCKS;
+
   return (
-    <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-6">
-      <h2 className="text-lg font-semibold text-white mb-3">
-        Enter Stock Tickers
-      </h2>
-      <div className="flex flex-wrap gap-2 items-center bg-slate-900 border border-slate-600 rounded-lg p-3 min-h-[48px] focus-within:border-emerald-500 transition-colors">
-        {tags.map((tag) => (
-          <span
-            key={tag}
-            className="inline-flex items-center gap-1 bg-emerald-500/20 text-emerald-400 px-3 py-1 rounded-full text-sm font-medium"
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-lg">{t("dashboard.search.title")}</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {/* Tag input area */}
+        <div className="flex flex-wrap gap-2 items-center border rounded-lg p-3 min-h-[48px] focus-within:ring-2 focus-within:ring-ring transition-all bg-background">
+          {tags.map((tag) => (
+            <Badge key={tag} variant="default" className="gap-1 pr-1">
+              {tag}
+              <button
+                onClick={() => removeTag(tag)}
+                className="ml-1 hover:text-primary-foreground/70 rounded-full"
+              >
+                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </Badge>
+          ))}
+          <input
+            type="text"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder={tags.length ? t("dashboard.search.addMore") : t("dashboard.search.placeholder")}
+            className="flex-1 min-w-[150px] bg-transparent outline-none text-sm placeholder:text-muted-foreground"
+          />
+        </div>
+
+        <div className="flex items-center justify-between">
+          <p className="text-xs text-muted-foreground">{t("dashboard.search.hint")}</p>
+          <Button
+            onClick={handleSubmit}
+            disabled={loading || (tags.length === 0 && !input.trim())}
           >
-            {tag}
-            <button
-              onClick={() => removeTag(tag)}
-              className="hover:text-emerald-200 ml-1"
-            >
-              &times;
-            </button>
-          </span>
-        ))}
-        <input
-          type="text"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder={tags.length ? "Add more..." : "NVDA, TSM, PLTR..."}
-          className="flex-1 min-w-[120px] bg-transparent text-white placeholder-slate-500 outline-none text-sm"
-        />
-      </div>
-      <div className="flex items-center justify-between mt-3">
-        <p className="text-xs text-slate-500">
-          Press Enter, comma, or space to add tickers
-        </p>
-        <button
-          onClick={handleSubmit}
-          disabled={loading || (tags.length === 0 && !input.trim())}
-          className="px-6 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 disabled:text-slate-500 text-white rounded-lg text-sm font-medium transition-colors"
-        >
-          {loading ? "Loading..." : "Analyze"}
-        </button>
-      </div>
-    </div>
+            {loading ? t("dashboard.search.loading") : t("dashboard.search.analyze")}
+          </Button>
+        </div>
+
+        {/* Popular stocks section */}
+        <Tabs defaultValue="popular" className="mt-2">
+          <TabsList>
+            <TabsTrigger value="popular">{t("dashboard.search.popular")}</TabsTrigger>
+            <TabsTrigger value="search">{t("dashboard.search.searchLabel")}</TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="popular">
+            <div className="flex flex-wrap gap-2 pt-2">
+              {POPULAR_STOCKS.slice(0, 12).map((stock) => {
+                const selected = tags.includes(stock.symbol);
+                return (
+                  <button
+                    key={stock.symbol}
+                    onClick={() => togglePopular(stock.symbol)}
+                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-sm transition-all ${
+                      selected
+                        ? "border-primary bg-primary/10 text-primary"
+                        : "border-border hover:border-primary/50 hover:bg-accent text-foreground"
+                    }`}
+                  >
+                    <span className="font-medium">{stock.symbol}</span>
+                    <span className="text-muted-foreground text-xs">{stock.name.split(" ")[0]}</span>
+                    {selected && (
+                      <svg className="w-3 h-3 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                      </svg>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </TabsContent>
+
+          <TabsContent value="search">
+            <div className="space-y-3 pt-2">
+              <Input
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder={t("dashboard.search.searchPlaceholder")}
+              />
+              <div className="max-h-[240px] overflow-y-auto space-y-1">
+                {filteredStocks.map((stock) => {
+                  const selected = tags.includes(stock.symbol);
+                  return (
+                    <button
+                      key={stock.symbol}
+                      onClick={() => togglePopular(stock.symbol)}
+                      className={`w-full flex items-center justify-between px-3 py-2 rounded-md text-sm transition-colors ${
+                        selected
+                          ? "bg-primary/10 text-primary"
+                          : "hover:bg-accent"
+                      }`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <span className="font-semibold w-14 text-left">{stock.symbol}</span>
+                        <span className="text-muted-foreground">{stock.name}</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Badge variant="secondary" className="text-xs">{stock.category}</Badge>
+                        {selected && (
+                          <svg className="w-4 h-4 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                          </svg>
+                        )}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </TabsContent>
+        </Tabs>
+      </CardContent>
+    </Card>
   );
 }
