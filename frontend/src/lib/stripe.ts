@@ -11,15 +11,18 @@ export function getStripe(): Stripe {
   return _stripe;
 }
 
+// Prices in SGD cents
 export const PLANS = {
   pro: {
     name: "Pro",
     priceId: process.env.STRIPE_PRO_PRICE_ID || "",
-    price: 999,
+    priceSGD: 199,   // S$1.99
+    currency: "sgd",
   },
   premium: {
     name: "Premium",
     priceId: process.env.STRIPE_PREMIUM_PRICE_ID || "",
-    price: 1999,
+    priceSGD: 599,   // S$5.99
+    currency: "sgd",
   },
 } as const;

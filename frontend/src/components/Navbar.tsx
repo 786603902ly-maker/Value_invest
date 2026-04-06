@@ -11,6 +11,7 @@ export default function Navbar() {
 
   const navItems = [
     { href: "/dashboard", label: t("nav.dashboard") },
+    { href: "/portfolio", label: t("nav.portfolio") },
     { href: "/alerts", label: t("nav.alerts") },
     { href: "/pricing", label: t("nav.pricing") },
   ];

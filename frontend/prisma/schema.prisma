@@ -8,17 +8,18 @@ datasource db {
 }
 
 model User {
-  id             String   @id @default(cuid())
-  email          String   @unique
+  id             String      @id @default(cuid())
+  email          String      @unique
   name           String?
   password       String?
-  tier           String   @default("free")
+  tier           String      @default("free")
   stripeId       String?
   telegramChatId String?
   watchlist      Stock[]
   alerts         Alert[]
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  portfolios     Portfolio[]
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
 }
 
 model Stock {
@@ -42,6 +43,27 @@ model Alert {
   threshold Float
   active    Boolean  @default(true)
   createdAt DateTime @default(now())
+}
+
+model Portfolio {
+  id        String          @id @default(cuid())
+  userId    String
+  user      User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name      String          @default("我的投资组合")
+  items     PortfolioItem[]
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+}
+
+model PortfolioItem {
+  id          String    @id @default(cuid())
+  portfolioId String
+  portfolio   Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+  ticker      String
+  note        String?
+  addedAt     DateTime  @default(now())
+
+  @@unique([portfolioId, ticker])
 }
 
 model StockCache {

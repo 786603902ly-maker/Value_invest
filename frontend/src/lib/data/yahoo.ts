@@ -16,51 +16,17 @@ export interface YahooData {
   trailingPE?: number;
   pegRatio?: number;
   recommendation?: string;
-  sector?: string;
-  industry?: string;
   marketCap?: number;
   fiftyTwoWeekHigh?: number;
   fiftyTwoWeekLow?: number;
+  // For DCF models
   sharesOutstanding?: number;
   freeCashflow?: number;
-  earningsGrowth?: number;
-  revenueGrowth?: number;
-  dcfValue?: number;
-}
-
-/**
- * Simple DCF: project FCF for 5 years using growth rate, then terminal value at 3% perpetual growth.
- * Discount rate = 10%.
- */
-function computeSimpleDCF(
-  freeCashflow: number,
-  growthRate: number,
-  sharesOutstanding: number
-): number | undefined {
-  if (!freeCashflow || freeCashflow <= 0 || !sharesOutstanding || sharesOutstanding <= 0) {
-    return undefined;
-  }
-  const discountRate = 0.10;
-  const terminalGrowth = 0.03;
-  const projectionYears = 5;
-
-  // Cap growth rate to reasonable range
-  const g = Math.max(-0.2, Math.min(growthRate, 0.5));
-
-  let totalPV = 0;
-  let lastFCF = freeCashflow;
-
-  for (let y = 1; y <= projectionYears; y++) {
-    lastFCF = lastFCF * (1 + g);
-    totalPV += lastFCF / Math.pow(1 + discountRate, y);
-  }
-
-  // Terminal value (Gordon Growth Model)
-  const terminalValue = (lastFCF * (1 + terminalGrowth)) / (discountRate - terminalGrowth);
-  totalPV += terminalValue / Math.pow(1 + discountRate, projectionYears);
-
-  const fairValue = totalPV / sharesOutstanding;
-  return Math.round(fairValue * 100) / 100;
+  earningsGrowthRate?: number;  // decimal, e.g. 0.15
+  revenueGrowthRate?: number;
+  eps?: number;
+  bookValuePerShare?: number;
+  dividendPerShare?: number;
 }
 
 export async function getYahooData(symbol: string): Promise<YahooData> {
@@ -72,7 +38,6 @@ export async function getYahooData(symbol: string): Promise<YahooData> {
         "summaryDetail",
         "financialData",
         "defaultKeyStatistics",
-        "recommendationTrend",
         "earningsTrend",
       ],
     });
@@ -83,45 +48,36 @@ export async function getYahooData(symbol: string): Promise<YahooData> {
     const summary = quote.summaryDetail;
     const earningsTrend = quote.earningsTrend;
 
-    const currentPrice = financial?.currentPrice ?? price?.regularMarketPrice ?? undefined;
-    const freeCashflow = financial?.freeCashflow ?? undefined;
-    const sharesOutstanding = stats?.sharesOutstanding ?? price?.sharesOutstanding ?? undefined;
-
-    // Get earnings growth from earningsTrend or financialData
-    let earningsGrowth = financial?.earningsGrowth ?? undefined;
-    const revenueGrowth = financial?.revenueGrowth ?? undefined;
-
-    // Try to get forward earnings growth from earningsTrend
-    if (earningsGrowth == null && earningsTrend?.trend) {
+    // Earnings growth: try multiple sources
+    let earningsGrowthRate: number | undefined = financial?.earningsGrowth ?? undefined;
+    if (earningsGrowthRate == null && earningsTrend?.trend) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const fiveYearTrend = earningsTrend.trend.find((t: any) => t.period === "+5y");
+      const fiveYr = earningsTrend.trend.find((t: any) => t.period === "+5y");
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const oneYearTrend = earningsTrend.trend.find((t: any) => t.period === "+1y");
-      if (fiveYearTrend?.growth != null) {
-        earningsGrowth = fiveYearTrend.growth;
-      } else if (oneYearTrend?.growth != null) {
-        earningsGrowth = oneYearTrend.growth;
-      }
+      const oneYr = earningsTrend.trend.find((t: any) => t.period === "+1y");
+      earningsGrowthRate = fiveYr?.growth ?? oneYr?.growth ?? undefined;
     }
 
-    // Compute PEG from forward PE and earnings growth if not directly available
-    let pegRatio = stats?.pegRatio ?? undefined;
-    const forwardPE = summary?.forwardPE ?? stats?.forwardPE ?? undefined;
-    if (pegRatio == null && forwardPE != null && earningsGrowth != null && earningsGrowth > 0) {
-      pegRatio = Math.round((forwardPE / (earningsGrowth * 100)) * 100) / 100;
+    const revenueGrowthRate: number | undefined = financial?.revenueGrowth ?? undefined;
+    const freeCashflow: number | undefined = financial?.freeCashflow ?? undefined;
+    const sharesOutstanding: number | undefined = stats?.sharesOutstanding ?? undefined;
+    const forwardPE: number | undefined = summary?.forwardPE ?? stats?.forwardPE ?? undefined;
+
+    // PEG: try direct, then compute
+    let pegRatio: number | undefined = stats?.pegRatio ?? undefined;
+    if (pegRatio == null && forwardPE != null && earningsGrowthRate != null && earningsGrowthRate > 0) {
+      pegRatio = Math.round((forwardPE / (earningsGrowthRate * 100)) * 100) / 100;
     }
 
-    // Compute simple DCF fair value
-    let dcfValue: number | undefined;
-    const growthForDCF = earningsGrowth ?? revenueGrowth;
-    if (freeCashflow != null && growthForDCF != null && sharesOutstanding != null) {
-      dcfValue = computeSimpleDCF(freeCashflow, growthForDCF, sharesOutstanding);
-    }
+    // EPS and book value for Graham models
+    const eps: number | undefined = stats?.trailingEps ?? stats?.forwardEps ?? undefined;
+    const bookValuePerShare: number | undefined = stats?.bookValue ?? undefined;
+    const dividendPerShare: number | undefined = summary?.dividendRate ?? undefined;
 
     return {
       ticker: symbol.toUpperCase(),
       companyName: price?.shortName || price?.longName,
-      currentPrice,
+      currentPrice: financial?.currentPrice ?? price?.regularMarketPrice ?? undefined,
       currency: price?.currency ?? "USD",
       targetHigh: financial?.targetHighPrice ?? undefined,
       targetLow: financial?.targetLowPrice ?? undefined,
@@ -132,15 +88,16 @@ export async function getYahooData(symbol: string): Promise<YahooData> {
       trailingPE: summary?.trailingPE ?? undefined,
       pegRatio,
       recommendation: financial?.recommendationKey ?? undefined,
-      sector: undefined,
       marketCap: price?.marketCap ?? undefined,
       fiftyTwoWeekHigh: summary?.fiftyTwoWeekHigh ?? undefined,
       fiftyTwoWeekLow: summary?.fiftyTwoWeekLow ?? undefined,
       sharesOutstanding,
       freeCashflow,
-      earningsGrowth,
-      revenueGrowth,
-      dcfValue,
+      earningsGrowthRate,
+      revenueGrowthRate,
+      eps,
+      bookValuePerShare,
+      dividendPerShare,
     };
   } catch (error) {
     console.error(`[Yahoo] Error fetching ${symbol}:`, error);

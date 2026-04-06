@@ -1,5 +1,7 @@
 import { getYahooData } from "./yahoo";
 import { getDcf, getTargetConsensus, getRating } from "./fmp";
+import { getAVOverview } from "./alpha-vantage";
+import { buildDCFModels } from "./dcf-models";
 import type { StockValuation, SourceValue, TargetPriceSource } from "@/types/stock";
 
 function safeAvg(values: (number | undefined)[]): number | undefined {
@@ -28,43 +30,63 @@ function pegSignal(peg?: number): string | undefined {
 export async function getFullValuation(symbol: string): Promise<StockValuation> {
   symbol = symbol.toUpperCase().trim();
 
-  // Fetch from all sources in parallel
-  const [yahooData, fmpDcfList, fmpConsensus, fmpRating] = await Promise.all([
+  // Fetch all sources in parallel
+  const [yahooData, fmpDcfList, fmpConsensus, fmpRating, avOverview] = await Promise.all([
     getYahooData(symbol),
     getDcf(symbol),
     getTargetConsensus(symbol),
     getRating(symbol),
+    getAVOverview(symbol),
   ]);
 
-  // --- DCF Fair Value ---
-  const dcfSources: SourceValue[] = [];
+  // Merge EPS/BookValue — prefer Alpha Vantage (more reliable for these), fallback to Yahoo
+  const eps = avOverview?.eps ?? yahooData.eps;
+  const bvps = avOverview?.bookValuePerShare ?? yahooData.bookValuePerShare;
+  const dividendPerShare = avOverview?.dividendPerShare ?? yahooData.dividendPerShare;
 
-  // Yahoo-computed DCF (simple model based on FCF + growth)
-  if (yahooData.dcfValue != null) {
-    dcfSources.push({
-      source: "Yahoo Finance (FCF Model)",
-      value: yahooData.dcfValue,
-      model: "Simple DCF (5yr FCF projection)",
-    });
-  }
+  // Growth rate: Yahoo earningsTrend is generally more forward-looking
+  const earningsGrowthRate = yahooData.earningsGrowthRate ?? yahooData.revenueGrowthRate;
+  const earningsGrowthPct = earningsGrowthRate != null ? earningsGrowthRate * 100 : undefined;
 
-  // FMP DCF sources
+  // --- Build computed DCF models ---
+  const computedModels = buildDCFModels({
+    freeCashflow: yahooData.freeCashflow,
+    eps,
+    bvps,
+    earningsGrowthPct,
+    earningsGrowthRate,
+    sharesOutstanding: yahooData.sharesOutstanding,
+    dividendPerShare,
+  });
+
+  // --- DCF Fair Value sources ---
+  const dcfSources: SourceValue[] = computedModels.map((m) => ({
+    source: m.source,
+    value: m.value,
+    model: m.model,
+    methodology: m.methodology,
+    annotation: m.annotation,
+  }));
+
+  // Add FMP DCF sources (from API)
   for (const d of fmpDcfList) {
     dcfSources.push({
-      source: d.source,
+      source: "FMP",
       value: Math.round(d.value * 100) / 100,
       model: d.model,
+      methodology: "FMP Discounted Cash Flow model",
+      annotation: "external",
     });
   }
 
   const dcfValues = dcfSources.map((s) => s.value);
 
-  // --- Target Price ---
+  // --- Target Price sources ---
   const targetSources: TargetPriceSource[] = [];
 
   if (yahooData.targetMean != null) {
     targetSources.push({
-      source: "Yahoo Finance Consensus",
+      source: "Yahoo Finance 分析师共识",
       high: yahooData.targetHigh,
       low: yahooData.targetLow,
       mean: yahooData.targetMean,
@@ -75,11 +97,18 @@ export async function getFullValuation(symbol: string): Promise<StockValuation> 
 
   if (fmpConsensus?.targetConsensus != null) {
     targetSources.push({
-      source: "FMP Analyst Consensus",
+      source: "FMP 分析师共识",
       high: fmpConsensus.targetHigh,
       low: fmpConsensus.targetLow,
       mean: fmpConsensus.targetConsensus,
       median: fmpConsensus.targetMedian,
+    });
+  }
+
+  if (avOverview?.analystTargetPrice != null) {
+    targetSources.push({
+      source: "Alpha Vantage 分析师目标",
+      mean: avOverview.analystTargetPrice,
     });
   }
 
@@ -102,7 +131,11 @@ export async function getFullValuation(symbol: string): Promise<StockValuation> 
     vsAvgTarget = Math.round(((currentPrice - targetAvg) / targetAvg) * 10000) / 100;
   }
 
-  // --- Recommendation ---
+  // Merge PEG — prefer AV
+  const pegRatio = avOverview?.pegRatio ?? yahooData.pegRatio;
+  const forwardPE = avOverview?.forwardPE ?? yahooData.forwardPE;
+
+  // Recommendation
   let recommendation = yahooData.recommendation;
   if (!recommendation && fmpRating?.ratingRecommendation) {
     recommendation = fmpRating.ratingRecommendation.toLowerCase();
@@ -125,17 +158,13 @@ export async function getFullValuation(symbol: string): Promise<StockValuation> 
       min: safeMin(allLows),
       max: safeMax(allHighs),
     },
-    forward_pe: {
-      value: yahooData.forwardPE,
-    },
-    peg_ratio: {
-      value: yahooData.pegRatio,
-    },
+    forward_pe: { value: forwardPE },
+    peg_ratio: { value: pegRatio },
     recommendation,
     deviations: {
       vs_avg_dcf: vsAvgDcf,
       vs_avg_target: vsAvgTarget,
-      peg_signal: pegSignal(yahooData.pegRatio),
+      peg_signal: pegSignal(pegRatio),
     },
     last_updated: new Date().toISOString(),
   };

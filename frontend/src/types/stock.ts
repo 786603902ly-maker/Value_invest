@@ -1,7 +1,11 @@
+export type DCFAnnotation = "authoritative" | "optimistic" | "pessimistic" | "classic" | "supplemental" | "external";
+
 export interface SourceValue {
   source: string;
   value: number;
   model?: string;
+  methodology?: string;
+  annotation?: DCFAnnotation;
 }
 
 export interface TargetPriceSource {
@@ -71,4 +75,19 @@ export interface Alert {
   condition: "above" | "below";
   threshold: number;
   active: boolean;
+}
+
+export interface PortfolioItem {
+  id: string;
+  ticker: string;
+  note?: string;
+  addedAt: string;
+}
+
+export interface Portfolio {
+  id: string;
+  name: string;
+  items: PortfolioItem[];
+  createdAt: string;
+  updatedAt: string;
 }
