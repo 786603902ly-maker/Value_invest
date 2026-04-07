@@ -134,40 +134,9 @@ export default function DashboardPage() {
 
               {stocks.map((stock) => (
                 <TabsContent key={stock.ticker} value={stock.ticker} className="space-y-6 mt-4">
-                  {/* Section 2: DCF Detail Table (Pro) */}
+                  {/* Section 2: Target Price Detail Table (Pro) */}
                   <TierGate
                     requiredTier="pro"
-                    upgradeText={t("dcf.upgrade")}
-                  >
-                    <Card>
-                      <CardHeader className="pb-3">
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <CardTitle className="text-base flex items-center gap-2">
-                              {t("dcf.title")}
-                              <Badge variant="outline" className="text-xs">
-                                {stock.dcf_fair_value.sources.length}{" "}
-                                {zh ? "个模型" : "models"}
-                              </Badge>
-                            </CardTitle>
-                            <p className="text-xs text-muted-foreground mt-1">
-                              {t("dcf.subtitle")}
-                            </p>
-                          </div>
-                          <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-200">
-                            Pro
-                          </Badge>
-                        </div>
-                      </CardHeader>
-                      <CardContent>
-                        <DCFDetailTable stock={stock} />
-                      </CardContent>
-                    </Card>
-                  </TierGate>
-
-                  {/* Section 3: Target Price Detail Table (Premium) */}
-                  <TierGate
-                    requiredTier="premium"
                     upgradeText={t("target.upgrade")}
                   >
                     <Card>
@@ -185,13 +154,44 @@ export default function DashboardPage() {
                               {t("target.subtitle")}
                             </p>
                           </div>
+                          <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-200">
+                            Pro
+                          </Badge>
+                        </div>
+                      </CardHeader>
+                      <CardContent>
+                        <TargetPriceDetailTable stock={stock} />
+                      </CardContent>
+                    </Card>
+                  </TierGate>
+
+                  {/* Section 3: DCF Detail Table (Premium) */}
+                  <TierGate
+                    requiredTier="premium"
+                    upgradeText={t("dcf.upgrade")}
+                  >
+                    <Card>
+                      <CardHeader className="pb-3">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <CardTitle className="text-base flex items-center gap-2">
+                              {t("dcf.title")}
+                              <Badge variant="outline" className="text-xs">
+                                {stock.dcf_fair_value.sources.length}{" "}
+                                {zh ? "个模型" : "models"}
+                              </Badge>
+                            </CardTitle>
+                            <p className="text-xs text-muted-foreground mt-1">
+                              {t("dcf.subtitle")}
+                            </p>
+                          </div>
                           <Badge variant="outline" className="text-xs bg-purple-50 text-purple-700 border-purple-200">
                             Premium
                           </Badge>
                         </div>
                       </CardHeader>
                       <CardContent>
-                        <TargetPriceDetailTable stock={stock} />
+                        <DCFDetailTable stock={stock} />
                       </CardContent>
                     </Card>
                   </TierGate>

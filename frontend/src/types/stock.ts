@@ -6,6 +6,7 @@ export interface SourceValue {
   model?: string;
   methodology?: string;
   annotation?: DCFAnnotation;
+  reliable?: boolean; // false = value is outside sane analyst range; excluded from avg
 }
 
 export interface TargetPriceSource {

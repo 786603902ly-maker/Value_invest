@@ -8,7 +8,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { InfoIcon } from "lucide-react";
+import { InfoIcon, AlertTriangleIcon } from "lucide-react";
 
 function fmt(v?: number, currency = "USD") {
   if (v == null) return "N/A";
@@ -177,7 +177,23 @@ export default function DCFDetailTable({ stock }: Props) {
                   </td>
                   <td className="py-3 pr-4 text-muted-foreground">{s.source}</td>
                   <td className="py-3 pr-4 text-right font-mono font-medium">
-                    {fmt(s.value, stock.currency)}
+                    <div className="flex items-center justify-end gap-1.5">
+                      {s.reliable === false && (
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <AlertTriangleIcon className="h-3.5 w-3.5 text-amber-500 cursor-help" />
+                          </TooltipTrigger>
+                          <TooltipContent className="max-w-[220px]">
+                            {locale === "zh"
+                              ? "此值显著偏离分析师目标区间，可能是模型假设与该股票特性不匹配，不计入平均值。"
+                              : "This value deviates significantly from the analyst target range. Excluded from the average."}
+                          </TooltipContent>
+                        </Tooltip>
+                      )}
+                      <span className={s.reliable === false ? "text-muted-foreground line-through" : ""}>
+                        {fmt(s.value, stock.currency)}
+                      </span>
+                    </div>
                   </td>
                   <td className="py-3 pr-4 text-right">
                     {deviation != null ? (

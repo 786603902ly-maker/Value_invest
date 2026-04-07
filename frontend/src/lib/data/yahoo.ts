@@ -63,10 +63,15 @@ export async function getYahooData(symbol: string): Promise<YahooData> {
     const sharesOutstanding: number | undefined = stats?.sharesOutstanding ?? undefined;
     const forwardPE: number | undefined = summary?.forwardPE ?? stats?.forwardPE ?? undefined;
 
-    // PEG: try direct, then compute
-    let pegRatio: number | undefined = stats?.pegRatio ?? undefined;
-    if (pegRatio == null && forwardPE != null && earningsGrowthRate != null && earningsGrowthRate > 0) {
-      pegRatio = Math.round((forwardPE / (earningsGrowthRate * 100)) * 100) / 100;
+    // PEG: PREFER Yahoo's raw trailingPegRatio / pegRatio directly. Do NOT compute as it's unreliable.
+    // Yahoo-finance2 v3 normalizes these to numbers (fallback: try raw key).
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const rawPeg: any = stats?.trailingPegRatio ?? stats?.pegRatio;
+    let pegRatio: number | undefined;
+    if (typeof rawPeg === "number" && isFinite(rawPeg)) {
+      pegRatio = Math.round(rawPeg * 100) / 100;
+    } else if (rawPeg && typeof rawPeg === "object" && typeof rawPeg.raw === "number") {
+      pegRatio = Math.round(rawPeg.raw * 100) / 100;
     }
 
     // EPS and book value for Graham models

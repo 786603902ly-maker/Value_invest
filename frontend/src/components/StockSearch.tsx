@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { useI18n } from "@/lib/i18n";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -41,6 +41,40 @@ export default function StockSearch({ onSearch, loading }: StockSearchProps) {
   const [input, setInput] = useState("");
   const [tags, setTags] = useState<string[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
+  const [remoteResults, setRemoteResults] = useState<
+    { symbol: string; name: string; exchange?: string }[]
+  >([]);
+  const [searching, setSearching] = useState(false);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Debounced remote search via Yahoo Finance (full universe)
+  useEffect(() => {
+    if (!searchQuery || searchQuery.length < 1) {
+      setRemoteResults([]);
+      return;
+    }
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(async () => {
+      setSearching(true);
+      try {
+        const res = await fetch(
+          `/api/stocks?search=${encodeURIComponent(searchQuery)}`
+        );
+        if (res.ok) {
+          const data = await res.json();
+          setRemoteResults(Array.isArray(data) ? data : []);
+        }
+      } catch {
+        setRemoteResults([]);
+      } finally {
+        setSearching(false);
+      }
+    }, 300);
+
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, [searchQuery]);
 
   const addTag = useCallback(
     (value: string) => {
@@ -100,6 +134,25 @@ export default function StockSearch({ onSearch, loading }: StockSearchProps) {
           s.category.toLowerCase().includes(searchQuery.toLowerCase())
       )
     : POPULAR_STOCKS;
+
+  // Merge local popular + remote results, dedupe by symbol
+  const combinedResults = (() => {
+    const seen = new Set<string>();
+    const out: { symbol: string; name: string; category?: string; exchange?: string }[] = [];
+    for (const s of filteredStocks) {
+      if (!seen.has(s.symbol)) {
+        seen.add(s.symbol);
+        out.push(s);
+      }
+    }
+    for (const r of remoteResults) {
+      if (!seen.has(r.symbol)) {
+        seen.add(r.symbol);
+        out.push(r);
+      }
+    }
+    return out;
+  })();
 
   return (
     <Card>
@@ -183,28 +236,56 @@ export default function StockSearch({ onSearch, loading }: StockSearchProps) {
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder={t("dashboard.search.searchPlaceholder")}
               />
-              <div className="max-h-[240px] overflow-y-auto space-y-1">
-                {filteredStocks.map((stock) => {
+              {searching && (
+                <p className="text-xs text-muted-foreground">
+                  {t("dashboard.search.loading")}
+                </p>
+              )}
+              <div className="max-h-[320px] overflow-y-auto space-y-1">
+                {combinedResults.length === 0 && searchQuery && !searching && (
+                  <p className="text-sm text-muted-foreground text-center py-4">
+                    {t("dashboard.search.loading")}
+                  </p>
+                )}
+                {combinedResults.map((stock) => {
                   const selected = tags.includes(stock.symbol);
                   return (
                     <button
                       key={stock.symbol}
                       onClick={() => togglePopular(stock.symbol)}
                       className={`w-full flex items-center justify-between px-3 py-2 rounded-md text-sm transition-colors ${
-                        selected
-                          ? "bg-primary/10 text-primary"
-                          : "hover:bg-accent"
+                        selected ? "bg-primary/10 text-primary" : "hover:bg-accent"
                       }`}
                     >
-                      <div className="flex items-center gap-3">
-                        <span className="font-semibold w-14 text-left">{stock.symbol}</span>
-                        <span className="text-muted-foreground">{stock.name}</span>
+                      <div className="flex items-center gap-3 min-w-0">
+                        <span className="font-semibold w-16 text-left shrink-0">
+                          {stock.symbol}
+                        </span>
+                        <span className="text-muted-foreground truncate">{stock.name}</span>
                       </div>
-                      <div className="flex items-center gap-2">
-                        <Badge variant="secondary" className="text-xs">{stock.category}</Badge>
+                      <div className="flex items-center gap-2 shrink-0">
+                        {"category" in stock && stock.category ? (
+                          <Badge variant="secondary" className="text-xs">
+                            {stock.category}
+                          </Badge>
+                        ) : stock.exchange ? (
+                          <Badge variant="outline" className="text-xs">
+                            {stock.exchange}
+                          </Badge>
+                        ) : null}
                         {selected && (
-                          <svg className="w-4 h-4 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                          <svg
+                            className="w-4 h-4 text-primary"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M5 13l4 4L19 7"
+                            />
                           </svg>
                         )}
                       </div>

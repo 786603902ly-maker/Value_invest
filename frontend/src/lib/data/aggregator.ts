@@ -59,16 +59,38 @@ export async function getFullValuation(symbol: string): Promise<StockValuation> 
     dividendPerShare,
   });
 
-  // --- DCF Fair Value sources ---
+  // Sanity reference band: use analyst target low/high if available, else 0.4x–2.5x of current price
+  const priceAnchor =
+    yahooData.targetMean ?? yahooData.currentPrice ?? undefined;
+  const bandLow =
+    yahooData.targetLow != null
+      ? yahooData.targetLow * 0.6
+      : priceAnchor != null
+      ? priceAnchor * 0.35
+      : undefined;
+  const bandHigh =
+    yahooData.targetHigh != null
+      ? yahooData.targetHigh * 1.5
+      : priceAnchor != null
+      ? priceAnchor * 2.8
+      : undefined;
+
+  const isReliable = (v: number): boolean => {
+    if (bandLow == null || bandHigh == null) return true;
+    return v >= bandLow && v <= bandHigh;
+  };
+
+  // --- DCF Fair Value sources (all included, but tagged with reliability) ---
   const dcfSources: SourceValue[] = computedModels.map((m) => ({
     source: m.source,
     value: m.value,
     model: m.model,
     methodology: m.methodology,
     annotation: m.annotation,
+    reliable: isReliable(m.value),
   }));
 
-  // Add FMP DCF sources (from API)
+  // Add FMP DCF sources (external, always considered reliable)
   for (const d of fmpDcfList) {
     dcfSources.push({
       source: "FMP",
@@ -76,10 +98,13 @@ export async function getFullValuation(symbol: string): Promise<StockValuation> 
       model: d.model,
       methodology: "FMP Discounted Cash Flow model",
       annotation: "external",
+      reliable: true,
     });
   }
 
-  const dcfValues = dcfSources.map((s) => s.value);
+  // Average ONLY reliable values (filters out extreme outliers like Graham Formula on high-growth stocks)
+  const reliableValues = dcfSources.filter((s) => s.reliable !== false).map((s) => s.value);
+  const dcfValues = reliableValues.length > 0 ? reliableValues : dcfSources.map((s) => s.value);
 
   // --- Target Price sources ---
   const targetSources: TargetPriceSource[] = [];
@@ -131,9 +156,9 @@ export async function getFullValuation(symbol: string): Promise<StockValuation> 
     vsAvgTarget = Math.round(((currentPrice - targetAvg) / targetAvg) * 10000) / 100;
   }
 
-  // Merge PEG — prefer AV
-  const pegRatio = avOverview?.pegRatio ?? yahooData.pegRatio;
-  const forwardPE = avOverview?.forwardPE ?? yahooData.forwardPE;
+  // PEG: prefer Yahoo's raw PEG (most commonly displayed). AV as fallback.
+  const pegRatio = yahooData.pegRatio ?? avOverview?.pegRatio;
+  const forwardPE = yahooData.forwardPE ?? avOverview?.forwardPE;
 
   // Recommendation
   let recommendation = yahooData.recommendation;
