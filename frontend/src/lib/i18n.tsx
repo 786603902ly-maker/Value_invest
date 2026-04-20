@@ -118,12 +118,12 @@ const translations = {
     // DCF Detail
     "dcf.title": "DCF 多模型估值详情",
     "dcf.subtitle": "基于不同方法论的内在价值估算，综合参考更全面",
-    "dcf.upgrade": "升级到专业版查看完整 DCF 多模型详情",
+    "dcf.upgrade": "升级到专业版（S$1.99/月）查看完整 DCF 多模型详情",
 
     // Target Price Detail
     "target.title": "分析师目标价详情",
     "target.subtitle": "来自多家机构的分析师预测，覆盖更广视角",
-    "target.upgrade": "升级到旗舰版查看多来源分析师目标价",
+    "target.upgrade": "升级到专业版（S$1.99/月）查看多来源分析师目标价",
 
     // Visualizations
     "chart.bullbear.title": "DCF 估值区间（牛/熊/基准）",
@@ -170,9 +170,9 @@ const translations = {
     "pricing.faq.q2": "可以随时取消吗？",
     "pricing.faq.a2": "当然！所有订阅均为月度付费，无合同约束。随时可在账户设置中取消。",
     "pricing.faq.q3": "免费版和付费版的主要区别？",
-    "pricing.faq.a3": "免费版只显示综合概览（均值）。专业版（S$1.99）额外显示 DCF 多模型明细，帮你理解每个估值背后的逻辑。旗舰版（S$5.99）进一步提供分析师目标价多源对比、高级图表和多组合管理。",
-    "pricing.faq.q4": "有哪些通知方式？",
-    "pricing.faq.a4": "专业版用户可收到邮件提醒。旗舰版用户还可通过 Telegram 接收即时通知。",
+    "pricing.faq.a3": "免费版只显示综合估值概览（均值）和基础图表。专业版（S$1.99）解锁全部功能：DCF 多模型明细、分析师目标价多源对比、安全边际雷达、牛熊区间图、多股仪表盘矩阵、比率散点、PEG/远期 PE 对比柱状图，以及 Alpha Vantage + FMP 的多源数据。",
+    "pricing.faq.q4": "为什么付费？",
+    "pricing.faq.a4": "我们接入了多个付费数据源（Alpha Vantage、Financial Modeling Prep 等），S$1.99/月 用于覆盖这些 API 调用成本与服务器开销。我们不投放广告，不贩卖用户数据。",
 
     // Login
     "login.create": "创建账户",
@@ -292,12 +292,12 @@ const translations = {
     // DCF Detail (EN)
     "dcf.title": "DCF Multi-Model Valuation",
     "dcf.subtitle": "Intrinsic value estimates across different methodologies",
-    "dcf.upgrade": "Upgrade to Pro to see full DCF multi-model details",
+    "dcf.upgrade": "Upgrade to Pro (S$1.99/mo) to see full DCF multi-model details",
 
     // Target Price Detail (EN)
     "target.title": "Analyst Target Price Details",
     "target.subtitle": "Forecasts from multiple institutions for a broader perspective",
-    "target.upgrade": "Upgrade to Premium to see multi-source analyst targets",
+    "target.upgrade": "Upgrade to Pro (S$1.99/mo) to see multi-source analyst targets",
 
     // Visualizations (EN)
     "chart.bullbear.title": "DCF Valuation Range (Bull/Bear/Base)",
@@ -344,9 +344,9 @@ const translations = {
     "pricing.faq.q2": "Can I cancel anytime?",
     "pricing.faq.a2": "Yes! All subscriptions are month-to-month with no contracts. Cancel anytime from your account settings.",
     "pricing.faq.q3": "What's the difference between plans?",
-    "pricing.faq.a3": "Free shows summary averages. Pro (S$1.99) adds full DCF multi-model details so you understand each valuation's logic. Premium (S$5.99) adds multi-source analyst targets, advanced charts, and portfolio management.",
-    "pricing.faq.q4": "What notification options are available?",
-    "pricing.faq.a4": "Pro users get email alerts. Premium users can also receive Telegram notifications for instant alerts.",
+    "pricing.faq.a3": "Free shows the valuation overview (averages) and basic charts. Pro (S$1.99) unlocks everything: DCF multi-model details, multi-source analyst targets, margin-of-safety radar, bull/bear range, multi-stock gauge matrix, ratio scatter, PEG/Fwd P/E comparison bars, plus Alpha Vantage + FMP multi-source data.",
+    "pricing.faq.q4": "Why charge at all?",
+    "pricing.faq.a4": "We pay for multiple data APIs (Alpha Vantage, Financial Modeling Prep, etc.). S$1.99/month simply covers these API costs and hosting. We don't run ads and don't sell your data.",
 
     "login.create": "Create Account",
     "login.welcome": "Welcome Back",

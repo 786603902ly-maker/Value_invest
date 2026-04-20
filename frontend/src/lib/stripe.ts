@@ -19,10 +19,4 @@ export const PLANS = {
     priceSGD: 199,   // S$1.99
     currency: "sgd",
   },
-  premium: {
-    name: "Premium",
-    priceId: process.env.STRIPE_PREMIUM_PRICE_ID || "",
-    priceSGD: 599,   // S$5.99
-    currency: "sgd",
-  },
 } as const;

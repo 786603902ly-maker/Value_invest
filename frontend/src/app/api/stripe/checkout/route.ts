@@ -12,14 +12,14 @@ export async function POST(req: NextRequest) {
 
   const { plan } = await req.json();
 
-  if (plan !== "pro" && plan !== "premium") {
+  if (plan !== "pro") {
     return NextResponse.json({ error: "Invalid plan" }, { status: 400 });
   }
 
   const planConfig = PLANS[plan as keyof typeof PLANS];
   if (!planConfig.priceId) {
     return NextResponse.json(
-      { error: "Stripe not configured. Set STRIPE_PRO_PRICE_ID and STRIPE_PREMIUM_PRICE_ID." },
+      { error: "Stripe not configured. Set STRIPE_PRO_PRICE_ID." },
       { status: 500 }
     );
   }

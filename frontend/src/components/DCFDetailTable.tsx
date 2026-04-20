@@ -72,6 +72,13 @@ const ANNOTATION_CONFIG: Record<
     desc: "来自第三方机构的DCF估值，提供独立视角",
     descEn: "DCF valuation from a third-party institution for an independent perspective",
   },
+  conservative: {
+    label: "保守基准",
+    labelEn: "Conservative Base",
+    color: "bg-amber-100 text-amber-800 border-amber-200",
+    desc: "面向保守价值投资者的基准：更高折现率、更低增长假设，平均值权重 >50%",
+    descEn: "Conservative benchmark with higher discount rate and lower growth assumption — gets >50% weight in the average",
+  },
 };
 
 interface Props {

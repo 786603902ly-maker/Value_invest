@@ -37,8 +37,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "User not found" }, { status: 404 });
   }
 
-  // Tier limits
-  const limits: Record<string, number> = { free: 3, pro: 20, premium: 9999 };
+  // Tier limits — Pro tier unlocks everything
+  const limits: Record<string, number> = { free: 3, pro: 9999, premium: 9999 };
   const limit = limits[user.tier] || 3;
 
   if (user.watchlist.length >= limit) {

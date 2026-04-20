@@ -41,7 +41,8 @@ export async function POST(req: NextRequest) {
   if (action === "create") {
     // Create a new portfolio
     const count = await prisma.portfolio.count({ where: { userId: user.id } });
-    const maxPortfolios = user.tier === "premium" ? 10 : user.tier === "pro" ? 3 : 1;
+    // Pro tier gets all features, free tier is limited to 1 portfolio
+    const maxPortfolios = user.tier === "pro" || user.tier === "premium" ? 10 : 1;
     if (count >= maxPortfolios) {
       return NextResponse.json(
         { error: `Your plan allows up to ${maxPortfolios} portfolio(s)` },
@@ -75,7 +76,8 @@ export async function POST(req: NextRequest) {
     });
     if (!portfolio) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-    const maxItems = user.tier === "premium" ? 50 : user.tier === "pro" ? 20 : 10;
+    // Pro tier: 50 stocks; Free tier: 10 stocks
+    const maxItems = user.tier === "pro" || user.tier === "premium" ? 50 : 10;
     if (portfolio.items.length >= maxItems) {
       return NextResponse.json(
         { error: `Your plan allows up to ${maxItems} stocks per portfolio` },
