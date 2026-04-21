@@ -1,5 +1,5 @@
 import { getYahooData } from "./yahoo";
-import { getDcf, getTargetConsensus, getRating } from "./fmp";
+import { getDcf, getTargetConsensus, getRating, getRatios, getKeyMetrics, getIncomeStatement, getEnterpriseValue } from "./fmp";
 import { getAVOverview } from "./alpha-vantage";
 import { buildDCFModels } from "./dcf-models";
 import type { StockValuation, SourceValue, TargetPriceSource } from "@/types/stock";
@@ -8,6 +8,37 @@ function safeAvg(values: (number | undefined)[]): number | undefined {
   const clean = values.filter((v): v is number => v != null);
   if (!clean.length) return undefined;
   return Math.round((clean.reduce((a, b) => a + b, 0) / clean.length) * 100) / 100;
+}
+
+/**
+ * Conservative-weighted average DCF:
+ * - The "conservative but reasonable" anchor value gets >50% weight
+ * - Anchor = the conservative FCF DCF if available; else the lowest reliable value
+ * - Other reliable values share the remaining weight equally
+ * This reflects a conservative investor's preference.
+ */
+function conservativeWeightedAvg(sources: SourceValue[]): number | undefined {
+  const reliable = sources.filter((s) => s.reliable !== false);
+  if (reliable.length === 0) return undefined;
+  if (reliable.length === 1) return reliable[0].value;
+
+  // Find anchor: prefer the dedicated "conservative" annotated model
+  let anchor = reliable.find((s) => s.annotation === "conservative" && s.model?.includes("FCF"));
+  if (!anchor) {
+    // Fallback: the lowest non-pessimistic (not Graham Number floor) value
+    const nonFloor = reliable.filter((s) => s.annotation !== "pessimistic");
+    const pool = nonFloor.length > 0 ? nonFloor : reliable;
+    anchor = pool.reduce((min, s) => (s.value < min.value ? s : min), pool[0]);
+  }
+
+  // Weight scheme: anchor 55%, remaining 45% shared equally across others
+  const others = reliable.filter((s) => s !== anchor);
+  if (others.length === 0) return Math.round(anchor.value * 100) / 100;
+
+  const anchorWeight = 0.55;
+  const otherWeight = 0.45 / others.length;
+  const weighted = anchor.value * anchorWeight + others.reduce((sum, s) => sum + s.value * otherWeight, 0);
+  return Math.round(weighted * 100) / 100;
 }
 
 function safeMin(values: (number | undefined)[]): number | undefined {
@@ -31,12 +62,16 @@ export async function getFullValuation(symbol: string): Promise<StockValuation> 
   symbol = symbol.toUpperCase().trim();
 
   // Fetch all sources in parallel
-  const [yahooData, fmpDcfList, fmpConsensus, fmpRating, avOverview] = await Promise.all([
+  const [yahooData, fmpDcfList, fmpConsensus, fmpRating, avOverview, fmpRatios, fmpKeyMetrics, fmpIncome, fmpEV] = await Promise.all([
     getYahooData(symbol),
     getDcf(symbol),
     getTargetConsensus(symbol),
     getRating(symbol),
     getAVOverview(symbol),
+    getRatios(symbol),
+    getKeyMetrics(symbol),
+    getIncomeStatement(symbol),
+    getEnterpriseValue(symbol),
   ]);
 
   // Merge EPS/BookValue — prefer Alpha Vantage (more reliable for these), fallback to Yahoo
@@ -48,6 +83,13 @@ export async function getFullValuation(symbol: string): Promise<StockValuation> 
   const earningsGrowthRate = yahooData.earningsGrowthRate ?? yahooData.revenueGrowthRate;
   const earningsGrowthPct = earningsGrowthRate != null ? earningsGrowthRate * 100 : undefined;
 
+  // EBITDA: prefer FMP income statement, fallback to Alpha Vantage
+  const ebitda = fmpIncome?.ebitda ?? avOverview?.ebitda;
+  // Net debt approximation: EV - Market Cap (if both available)
+  const netDebt = fmpEV?.enterpriseValue != null && fmpEV?.marketCap != null
+    ? fmpEV.enterpriseValue - fmpEV.marketCap
+    : undefined;
+
   // --- Build computed DCF models ---
   const computedModels = buildDCFModels({
     freeCashflow: yahooData.freeCashflow,
@@ -57,6 +99,8 @@ export async function getFullValuation(symbol: string): Promise<StockValuation> 
     earningsGrowthRate,
     sharesOutstanding: yahooData.sharesOutstanding,
     dividendPerShare,
+    ebitda,
+    netDebt,
   });
 
   // Sanity reference band: use analyst target low/high if available, else 0.4x–2.5x of current price
@@ -105,6 +149,8 @@ export async function getFullValuation(symbol: string): Promise<StockValuation> 
   // Average ONLY reliable values (filters out extreme outliers like Graham Formula on high-growth stocks)
   const reliableValues = dcfSources.filter((s) => s.reliable !== false).map((s) => s.value);
   const dcfValues = reliableValues.length > 0 ? reliableValues : dcfSources.map((s) => s.value);
+  // Conservative-weighted average: anchor value gets >50% weight
+  const dcfWeightedAvg = conservativeWeightedAvg(dcfSources);
 
   // --- Target Price sources ---
   const targetSources: TargetPriceSource[] = [];
@@ -143,7 +189,8 @@ export async function getFullValuation(symbol: string): Promise<StockValuation> 
 
   // --- Deviations ---
   const currentPrice = yahooData.currentPrice;
-  const dcfAvg = safeAvg(dcfValues);
+  // Prefer conservative-weighted avg; fallback to simple avg if weighted not available
+  const dcfAvg = dcfWeightedAvg ?? safeAvg(dcfValues);
   const targetAvg = safeAvg(allMeans);
 
   let vsAvgDcf: number | undefined;
@@ -156,9 +203,20 @@ export async function getFullValuation(symbol: string): Promise<StockValuation> 
     vsAvgTarget = Math.round(((currentPrice - targetAvg) / targetAvg) * 10000) / 100;
   }
 
-  // PEG: prefer Yahoo's raw PEG (most commonly displayed). AV as fallback.
-  const pegRatio = yahooData.pegRatio ?? avOverview?.pegRatio;
-  const forwardPE = yahooData.forwardPE ?? avOverview?.forwardPE;
+  // Forward PE: Yahoo → AV → FMP ratios
+  const forwardPE = yahooData.forwardPE ?? avOverview?.forwardPE ?? fmpRatios?.forwardPE;
+
+  // PEG: multi-source fallback chain for stability
+  // Yahoo (primary) → Alpha Vantage → FMP ratios-ttm → FMP key-metrics-ttm → computed from forwardPE/growth
+  let pegRatio: number | undefined =
+    yahooData.pegRatio ?? avOverview?.pegRatio ?? fmpRatios?.pegRatio ?? fmpKeyMetrics?.pegRatio;
+  // Last-resort: compute PEG from forwardPE and growth rate if all authoritative sources missing
+  if (pegRatio == null && forwardPE != null && earningsGrowthPct != null && earningsGrowthPct > 0) {
+    const computed = forwardPE / earningsGrowthPct;
+    if (isFinite(computed) && computed > 0 && computed < 15) {
+      pegRatio = Math.round(computed * 100) / 100;
+    }
+  }
 
   // Recommendation
   let recommendation = yahooData.recommendation;
@@ -173,7 +231,7 @@ export async function getFullValuation(symbol: string): Promise<StockValuation> 
     currency: yahooData.currency || "USD",
     dcf_fair_value: {
       sources: dcfSources,
-      avg: safeAvg(dcfValues),
+      avg: dcfAvg,
       min: safeMin(dcfValues),
       max: safeMax(dcfValues),
     },

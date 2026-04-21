@@ -4,7 +4,7 @@ import { useI18n } from "@/lib/i18n";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { StockValuation } from "@/types/stock";
 
-interface Props { data: StockValuation[]; }
+interface Props { data: StockValuation[]; hideHeader?: boolean; }
 
 function computeScore(stock: StockValuation): number {
   let score = 50;
@@ -52,8 +52,32 @@ function GaugeArc({ score }: { score: number }) {
   );
 }
 
-export default function GaugeChart({ data }: Props) {
+export default function GaugeChart({ data, hideHeader }: Props) {
   const { t } = useI18n();
+
+  const grid = (
+    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+      {data.map((stock) => {
+        const score = computeScore(stock);
+        const label = score >= 70 ? t("signal.buy") : score >= 40 ? t("signal.hold") : t("signal.sell");
+        const color = score >= 70 ? "text-emerald-400" : score >= 40 ? "text-yellow-400" : "text-red-400";
+        const bg = score >= 70 ? "bg-emerald-500/20" : score >= 40 ? "bg-yellow-500/20" : "bg-red-500/20";
+        return (
+          <div key={stock.ticker} className="flex flex-col items-center">
+            <GaugeArc score={score} />
+            <div className="mt-2 text-center">
+              <div className="font-semibold">{stock.ticker}</div>
+              <div className={`text-sm font-bold mt-1 px-3 py-1 rounded-full ${bg} ${color}`}>
+                {label} ({score})
+              </div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+
+  if (hideHeader) return grid;
 
   return (
     <Card>
@@ -61,27 +85,7 @@ export default function GaugeChart({ data }: Props) {
         <CardTitle className="text-lg">{t("chart.gauge.title")}</CardTitle>
         <CardDescription>{t("chart.gauge.subtitle")}</CardDescription>
       </CardHeader>
-      <CardContent>
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
-          {data.map((stock) => {
-            const score = computeScore(stock);
-            const label = score >= 70 ? t("signal.buy") : score >= 40 ? t("signal.hold") : t("signal.sell");
-            const color = score >= 70 ? "text-emerald-400" : score >= 40 ? "text-yellow-400" : "text-red-400";
-            const bg = score >= 70 ? "bg-emerald-500/20" : score >= 40 ? "bg-yellow-500/20" : "bg-red-500/20";
-            return (
-              <div key={stock.ticker} className="flex flex-col items-center">
-                <GaugeArc score={score} />
-                <div className="mt-2 text-center">
-                  <div className="font-semibold">{stock.ticker}</div>
-                  <div className={`text-sm font-bold mt-1 px-3 py-1 rounded-full ${bg} ${color}`}>
-                    {label} ({score})
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </CardContent>
+      <CardContent>{grid}</CardContent>
     </Card>
   );
 }

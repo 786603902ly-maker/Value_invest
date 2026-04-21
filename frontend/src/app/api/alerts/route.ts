@@ -39,12 +39,13 @@ export async function POST(req: NextRequest) {
   // Tier check
   if (user.tier === "free") {
     return NextResponse.json(
-      { error: "Alerts require Pro or Premium plan" },
+      { error: "Alerts require Pro plan (S$1.99/mo)" },
       { status: 403 }
     );
   }
 
-  const alertLimits: Record<string, number> = { pro: 5, premium: 9999 };
+  // Pro tier: unlimited alerts
+  const alertLimits: Record<string, number> = { pro: 9999, premium: 9999 };
   const limit = alertLimits[user.tier] || 0;
 
   if (user.alerts.length >= limit) {

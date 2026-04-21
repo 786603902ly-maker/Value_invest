@@ -1,4 +1,4 @@
-export type DCFAnnotation = "authoritative" | "optimistic" | "pessimistic" | "classic" | "supplemental" | "external";
+export type DCFAnnotation = "authoritative" | "optimistic" | "pessimistic" | "classic" | "supplemental" | "external" | "conservative";
 
 export interface SourceValue {
   source: string;

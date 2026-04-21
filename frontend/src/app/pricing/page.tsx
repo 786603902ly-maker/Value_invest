@@ -5,7 +5,7 @@ import { useI18n } from "@/lib/i18n";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { CheckIcon, XIcon } from "lucide-react";
+import { CheckIcon, XIcon, InfoIcon } from "lucide-react";
 
 interface FeatureItem {
   text: string;
@@ -17,66 +17,52 @@ const FEATURES: Record<string, { zh: FeatureItem[]; en: FeatureItem[] }> = {
     zh: [
       { text: "估值概览表（DCF 均值 + 目标价均值）", included: true },
       { text: "基础偏离度图表", included: true },
+      { text: "买入/持有/卖出 信号", included: true },
       { text: "1 个投资组合（最多 10 只股票）", included: true },
       { text: "Yahoo Finance 实时数据", included: true },
       { text: "DCF 多模型详情", included: false },
       { text: "分析师目标价多源对比", included: false },
-      { text: "高级图表（雷达图、牛熊区间）", included: false },
+      { text: "高级图表（雷达图、牛熊区间、仪表盘矩阵）", included: false },
+      { text: "Alpha Vantage + FMP 多源数据", included: false },
       { text: "邮件提醒", included: false },
     ],
     en: [
       { text: "Valuation overview (DCF avg + target avg)", included: true },
       { text: "Basic deviation chart", included: true },
+      { text: "Buy/Hold/Sell signal", included: true },
       { text: "1 portfolio (up to 10 stocks)", included: true },
       { text: "Yahoo Finance real-time data", included: true },
       { text: "DCF multi-model details", included: false },
       { text: "Multi-source analyst target prices", included: false },
-      { text: "Advanced charts (radar, bull/bear)", included: false },
+      { text: "Advanced charts (radar, bull/bear, gauge matrix)", included: false },
+      { text: "Alpha Vantage + FMP multi-source data", included: false },
       { text: "Email alerts", included: false },
     ],
   },
   pro: {
     zh: [
-      { text: "估值概览（含 DCF 均值与偏离度）", included: true },
-      { text: "分析师目标价多源对比明细", included: true },
-      { text: "基础偏离度图表", included: true },
-      { text: "3 个投资组合（最多 20 只股票）", included: true },
-      { text: "Alpha Vantage 多源数据", included: true },
-      { text: "5 个邮件提醒", included: true },
-      { text: "DCF 多模型详情", included: false },
-      { text: "高级图表（雷达图、牛熊区间）", included: false },
-    ],
-    en: [
-      { text: "Overview (with DCF avg + deviation)", included: true },
-      { text: "Multi-source analyst target details", included: true },
-      { text: "Basic deviation chart", included: true },
-      { text: "3 portfolios (up to 20 stocks)", included: true },
-      { text: "Alpha Vantage multi-source data", included: true },
-      { text: "5 email alerts", included: true },
-      { text: "DCF multi-model details", included: false },
-      { text: "Advanced charts (radar, bull/bear)", included: false },
-    ],
-  },
-  premium: {
-    zh: [
-      { text: "估值概览（含 DCF 均值与偏离度）", included: true },
-      { text: "分析师目标价多源对比明细", included: true },
+      { text: "估值概览（含 DCF 均值、偏离度、保守加权）", included: true },
       { text: "DCF 多模型详情（格雷厄姆、Lynch、FCF 等）", included: true },
-      { text: "全部高级图表（雷达图、牛熊区间、安全边际）", included: true },
+      { text: "分析师目标价多源对比明细", included: true },
+      { text: "全部高级图表（仪表盘矩阵、雷达、牛熊、比率散点）", included: true },
+      { text: "PEG / Fwd P/E / 目标价比率柱状对比图", included: true },
       { text: "10 个投资组合（最多 50 只股票）", included: true },
-      { text: "无限邮件 + Telegram 提醒", included: true },
       { text: "Alpha Vantage + FMP 多源数据", included: true },
+      { text: "无限邮件提醒", included: true },
       { text: "CSV 数据导出", included: true },
+      { text: "优先客服支持", included: true },
     ],
     en: [
-      { text: "Overview (with DCF avg + deviation)", included: true },
-      { text: "Multi-source analyst target details", included: true },
+      { text: "Overview with DCF avg, deviation & conservative weighting", included: true },
       { text: "DCF multi-model details (Graham, Lynch, FCF...)", included: true },
-      { text: "All advanced charts (radar, bull/bear, MoS)", included: true },
+      { text: "Multi-source analyst target details", included: true },
+      { text: "All advanced charts (gauge matrix, radar, bull/bear, scatter)", included: true },
+      { text: "PEG / Fwd P/E / Target ratio comparison bars", included: true },
       { text: "10 portfolios (up to 50 stocks)", included: true },
-      { text: "Unlimited email + Telegram alerts", included: true },
       { text: "Alpha Vantage + FMP multi-source data", included: true },
+      { text: "Unlimited email alerts", included: true },
       { text: "CSV data export", included: true },
+      { text: "Priority support", included: true },
     ],
   },
 };
@@ -91,7 +77,7 @@ export default function PricingPage() {
       name: zh ? "免费版" : "Free",
       price: "S$0",
       period: zh ? "永久免费" : "forever",
-      desc: zh ? "基础估值数据入门" : "Get started with basic valuation data",
+      desc: zh ? "基础估值数据入门" : "Get started with basic valuation",
       cta: zh ? "免费开始" : "Get Started Free",
       ctaHref: "/dashboard",
       ctaVariant: "outline" as const,
@@ -101,21 +87,11 @@ export default function PricingPage() {
       name: zh ? "专业版" : "Pro",
       price: "S$1.99",
       period: zh ? "/月" : "/month",
-      desc: zh ? "一杯果汁钱，看完整 DCF 多模型" : "Price of a juice — full DCF multi-model",
+      desc: zh ? "一杯果汁钱，解锁全部功能" : "Price of a juice — unlock everything",
       cta: zh ? "订阅专业版" : "Subscribe Pro",
       popular: true,
       ctaHref: "/login",
       ctaVariant: "default" as const,
-    },
-    {
-      key: "premium",
-      name: zh ? "旗舰版" : "Premium",
-      price: "S$5.99",
-      period: zh ? "/月" : "/month",
-      desc: zh ? "一杯咖啡钱，解锁全部功能" : "Price of a coffee — unlock everything",
-      cta: zh ? "升级旗舰版" : "Go Premium",
-      ctaHref: "/login",
-      ctaVariant: "outline" as const,
     },
   ];
 
@@ -126,18 +102,22 @@ export default function PricingPage() {
     { q: t("pricing.faq.q4"), a: t("pricing.faq.a4") },
   ];
 
-  const comparisonRows: [string, boolean | string, boolean | string, boolean | string][] = [
-    [zh ? "估值概览表" : "Overview table", true, true, true],
-    [zh ? "估值概览中显示 DCF 均值与偏离" : "DCF avg in overview", false, true, true],
-    [zh ? "分析师目标价多源明细" : "Multi-source target details", false, true, true],
-    [zh ? "DCF 多模型明细" : "DCF multi-model details", false, false, true],
-    [zh ? "安全边际雷达图" : "Margin of safety radar", false, false, true],
-    [zh ? "牛熊估值区间图" : "Bull/bear range chart", false, false, true],
-    [zh ? "投资组合" : "Portfolios", "1", "3", "10"],
-    [zh ? "每组合最多股票" : "Stocks per portfolio", "10", "20", "50"],
-    [zh ? "邮件提醒" : "Email alerts", false, "5", zh ? "无限" : "Unlimited"],
-    [zh ? "Telegram 提醒" : "Telegram alerts", false, false, true],
-    [zh ? "Alpha Vantage 数据" : "Alpha Vantage data", false, true, true],
+  const comparisonRows: [string, boolean | string, boolean | string][] = [
+    [zh ? "估值概览表" : "Overview table", true, true],
+    [zh ? "买入/持有/卖出 信号" : "Buy/Hold/Sell signal", true, true],
+    [zh ? "基础偏离度图表" : "Basic deviation chart", true, true],
+    [zh ? "多股仪表盘矩阵" : "Multi-stock gauge matrix", false, true],
+    [zh ? "公允价值/目标价 比率散点" : "Fair value/Target ratio scatter", false, true],
+    [zh ? "PEG / 远期 PE / 目标价 柱状对比" : "PEG / Fwd P/E / Target bars", false, true],
+    [zh ? "DCF 多模型明细" : "DCF multi-model details", false, true],
+    [zh ? "分析师目标价多源明细" : "Multi-source target details", false, true],
+    [zh ? "安全边际雷达图" : "Margin of safety radar", false, true],
+    [zh ? "牛熊估值区间图" : "Bull/bear range chart", false, true],
+    [zh ? "投资组合" : "Portfolios", "1", "10"],
+    [zh ? "每组合最多股票" : "Stocks per portfolio", "10", "50"],
+    [zh ? "邮件提醒" : "Email alerts", false, zh ? "无限" : "Unlimited"],
+    [zh ? "Alpha Vantage + FMP 数据" : "Alpha Vantage + FMP data", false, true],
+    [zh ? "CSV 数据导出" : "CSV data export", false, true],
   ];
 
   return (
@@ -147,8 +127,29 @@ export default function PricingPage() {
         <p className="text-muted-foreground max-w-xl mx-auto">{t("pricing.subtitle")}</p>
       </div>
 
+      {/* Why we charge — honest explanation */}
+      <div className="max-w-3xl mx-auto px-4">
+        <Card className="border-primary/30 bg-primary/5">
+          <CardContent className="p-5">
+            <div className="flex gap-3">
+              <InfoIcon className="h-5 w-5 text-primary flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="font-semibold mb-1.5">
+                  {zh ? "为什么收费？" : "Why we charge"}
+                </p>
+                <p className="text-sm text-muted-foreground leading-relaxed">
+                  {zh
+                    ? "为了给你更完整、更准确的估值数据，我们接入了多个付费 API（Alpha Vantage、Financial Modeling Prep 等），每一次查询都会产生真实的 API 调用成本。S$1.99/月 仅用于覆盖数据源费用与服务器开销 — 我们不投放广告，不贩卖用户数据。一杯果汁的钱，让你拥有接近券商级别的多源估值工具。"
+                    : "To give you complete and accurate valuation data, we pay for multiple data APIs (Alpha Vantage, Financial Modeling Prep, etc.) — every query incurs real API costs. S$1.99/month simply covers these data-source fees and hosting. We don't run ads. We don't sell your data. For the price of a juice, you get a broker-grade multi-source valuation tool."}
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
       {/* Plan cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-start max-w-5xl mx-auto px-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start max-w-3xl mx-auto px-4">
         {plans.map((plan) => {
           const features = FEATURES[plan.key][zh ? "zh" : "en"];
           return (
@@ -161,7 +162,7 @@ export default function PricingPage() {
               {plan.popular && (
                 <div className="absolute -top-3 left-1/2 -translate-x-1/2">
                   <Badge className="bg-primary text-primary-foreground px-3 py-1">
-                    {zh ? "最受欢迎" : "POPULAR"}
+                    {zh ? "推荐" : "RECOMMENDED"}
                   </Badge>
                 </div>
               )}
@@ -203,7 +204,7 @@ export default function PricingPage() {
       </div>
 
       {/* Feature comparison table */}
-      <div className="max-w-4xl mx-auto px-4">
+      <div className="max-w-3xl mx-auto px-4">
         <h2 className="text-xl font-bold mb-6 text-center">
           {zh ? "功能对比一览" : "Feature Comparison"}
         </h2>
@@ -218,16 +219,13 @@ export default function PricingPage() {
                 <th className="text-center py-3 px-4 font-medium text-primary">
                   {zh ? "专业 S$1.99" : "Pro S$1.99"}
                 </th>
-                <th className="text-center py-3 px-4 font-medium">
-                  {zh ? "旗舰 S$5.99" : "Premium S$5.99"}
-                </th>
               </tr>
             </thead>
             <tbody>
-              {comparisonRows.map(([feature, free, pro, premium], i) => (
+              {comparisonRows.map(([feature, free, pro], i) => (
                 <tr key={i} className="border-b hover:bg-muted/20">
                   <td className="py-2.5 pr-6">{feature}</td>
-                  {[free, pro, premium].map((val, j) => (
+                  {[free, pro].map((val, j) => (
                     <td key={j} className="py-2.5 px-4 text-center">
                       {val === true ? (
                         <CheckIcon className="h-4 w-4 text-green-500 mx-auto" />
