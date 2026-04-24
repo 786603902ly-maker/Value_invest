@@ -1,6 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, Suspense } from "react";
+import { useSession } from "next-auth/react";
+import { useSearchParams } from "next/navigation";
 import { useI18n } from "@/lib/i18n";
 import StockSearch from "@/components/StockSearch";
 import ValuationTable from "@/components/ValuationTable";
@@ -12,24 +14,23 @@ import GaugeChart from "@/components/GaugeChart";
 import BullBearChart from "@/components/BullBearChart";
 import MarginOfSafetyChart from "@/components/MarginOfSafetyChart";
 import ComparisonBarCharts from "@/components/ComparisonBarCharts";
-import { StockValuation } from "@/types/stock";
+import { StockValuation, Tier } from "@/types/stock";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import Link from "next/link";
 import { LockIcon, SparklesIcon, TrendingUpIcon, TrendingDownIcon, MinusIcon } from "lucide-react";
 
-// For now, show all features (tier gating will be enforced when auth is fully wired)
-const USER_TIER: "free" | "pro" = "pro";
-
 function TierGate({
   upgradeText,
+  userTier,
   children,
 }: {
   upgradeText: string;
+  userTier: Tier;
   children: React.ReactNode;
 }) {
-  const hasAccess = USER_TIER === "pro";
+  const hasAccess = userTier === "pro" || userTier === "premium";
 
   if (hasAccess) return <>{children}</>;
 
@@ -51,13 +52,26 @@ function TierGate({
   );
 }
 
-export default function DashboardPage() {
+function DashboardContent() {
+  const { data: session, update: updateSession } = useSession();
+  const searchParams = useSearchParams();
+  const userTier = ((session?.user as { tier?: string })?.tier ?? "free") as Tier;
   const { t, locale } = useI18n();
   const zh = locale === "zh";
   const [stocks, setStocks] = useState<StockValuation[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeStock, setActiveStock] = useState<string | null>(null);
+  const [upgradeSuccess, setUpgradeSuccess] = useState(false);
+
+  // After Stripe redirect back with ?upgraded=true, refresh the session to load new tier
+  useEffect(() => {
+    if (searchParams?.get("upgraded") === "true" && session?.user) {
+      setUpgradeSuccess(true);
+      // Trigger JWT refresh to pick up new tier from DB
+      updateSession();
+    }
+  }, [searchParams, session?.user, updateSession]);
 
   const handleSearch = async (symbols: string[]) => {
     setLoading(true);
@@ -91,6 +105,26 @@ export default function DashboardPage() {
 
       <StockSearch onSearch={handleSearch} loading={loading} />
 
+      {/* Stripe payment success banner */}
+      {upgradeSuccess && (
+        <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-xl px-4 py-3 flex items-center justify-between">
+          <div className="flex items-center gap-2 text-emerald-700 dark:text-emerald-400">
+            <span className="text-lg">🎉</span>
+            <span className="text-sm font-medium">
+              {zh
+                ? "欢迎加入 Pro！所有专属功能已解锁。"
+                : "Welcome to Pro! All exclusive features are now unlocked."}
+            </span>
+          </div>
+          <button
+            onClick={() => setUpgradeSuccess(false)}
+            className="text-muted-foreground hover:text-foreground text-xs"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       {error && (
         <div className="bg-destructive/10 border border-destructive/30 rounded-lg px-4 py-3 text-destructive text-sm">
           {error}
@@ -107,11 +141,12 @@ export default function DashboardPage() {
       {!loading && stocks.length > 0 && (
         <>
           {/* ============ SECTION 1: Summary Table (free, column-gated for DCF) ============ */}
-          <ValuationTable data={stocks} userTier={USER_TIER} />
+          <ValuationTable data={stocks} userTier={userTier} />
 
           {/* ============ SECTION 2: PRO — Top of paid area ============ */}
           {/* 2a: Multi-stock gauge matrix — see all scores at a glance */}
           <TierGate
+            userTier={userTier}
             upgradeText={
               zh
                 ? "升级 Pro 查看多股仪表盘矩阵"
@@ -146,6 +181,7 @@ export default function DashboardPage() {
           {/* 2b: Ratio scatter — moved to top of paid area */}
           {stocks.length > 1 && (
             <TierGate
+              userTier={userTier}
               upgradeText={
                 zh
                   ? "升级 Pro 查看比率散点图"
@@ -166,6 +202,7 @@ export default function DashboardPage() {
 
           {/* ============ SECTION 3: Multi-stock comparison bar charts ============ */}
           <TierGate
+            userTier={userTier}
             upgradeText={
               zh
                 ? "升级 Pro 查看多股对比柱状图"
@@ -261,7 +298,7 @@ export default function DashboardPage() {
               {/* Per-stock details */}
               <div className="space-y-5">
                 {/* Target Price Detail (Pro) */}
-                <TierGate upgradeText={t("target.upgrade")}>
+                <TierGate userTier={userTier} upgradeText={t("target.upgrade")}>
                   <Card>
                     <CardHeader className="pb-3">
                       <div className="flex items-center justify-between">
@@ -289,7 +326,7 @@ export default function DashboardPage() {
                 </TierGate>
 
                 {/* DCF Detail Table (Pro) */}
-                <TierGate upgradeText={t("dcf.upgrade")}>
+                <TierGate userTier={userTier} upgradeText={t("dcf.upgrade")}>
                   <Card>
                     <CardHeader className="pb-3">
                       <div className="flex items-center justify-between">
@@ -331,6 +368,7 @@ export default function DashboardPage() {
 
                   {/* Bull/Bear Range (Pro) */}
                   <TierGate
+                    userTier={userTier}
                     upgradeText={
                       zh ? "升级 Pro 查看牛熊区间图" : "Upgrade to Pro for bull/bear chart"
                     }
@@ -353,6 +391,7 @@ export default function DashboardPage() {
 
                   {/* Margin of Safety Radar (Pro) */}
                   <TierGate
+                    userTier={userTier}
                     upgradeText={
                       zh ? "升级 Pro 查看安全边际雷达" : "Upgrade to Pro for MoS radar"
                     }
@@ -379,5 +418,13 @@ export default function DashboardPage() {
         </>
       )}
     </div>
+  );
+}
+
+export default function DashboardPage() {
+  return (
+    <Suspense fallback={<div className="flex items-center justify-center py-12"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" /></div>}>
+      <DashboardContent />
+    </Suspense>
   );
 }

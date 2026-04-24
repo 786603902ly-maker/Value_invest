@@ -1,10 +1,22 @@
 import { NextAuthOptions } from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
+import GoogleProvider from "next-auth/providers/google";
 import { prisma } from "./db";
 import bcrypt from "bcryptjs";
 
 export const authOptions: NextAuthOptions = {
   providers: [
+    // Google OAuth — one-click Gmail login
+    ...(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET
+      ? [
+          GoogleProvider({
+            clientId: process.env.GOOGLE_CLIENT_ID,
+            clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+          }),
+        ]
+      : []),
+
+    // Email/Password credentials
     CredentialsProvider({
       name: "Email",
       credentials: {
@@ -32,7 +44,7 @@ export const authOptions: NextAuthOptions = {
               name: credentials.name || undefined,
             },
           });
-          return { id: user.id, email: user.email, name: user.name };
+          return { id: user.id, email: user.email, name: user.name, tier: user.tier };
         }
 
         // Login
@@ -44,23 +56,72 @@ export const authOptions: NextAuthOptions = {
         const valid = await bcrypt.compare(credentials.password, user.password);
         if (!valid) return null;
 
-        return { id: user.id, email: user.email, name: user.name };
+        return { id: user.id, email: user.email, name: user.name, tier: user.tier };
       },
     }),
   ],
+
   session: { strategy: "jwt" },
+
   callbacks: {
-    async jwt({ token, user }) {
-      if (user) token.id = user.id;
+    // Auto-create DB user on first Google sign-in
+    async signIn({ user, account }) {
+      if (account?.provider === "google" && user.email) {
+        const existing = await prisma.user.findUnique({
+          where: { email: user.email },
+        });
+        if (!existing) {
+          await prisma.user.create({
+            data: {
+              email: user.email,
+              name: user.name ?? undefined,
+            },
+          });
+        }
+      }
+      return true;
+    },
+
+    // Store id + tier in JWT (refreshed from DB on update trigger)
+    async jwt({ token, user, trigger }) {
+      if (user) {
+        // Look up DB record to get our internal id and tier
+        const dbUser = await prisma.user.findUnique({
+          where: { email: user.email! },
+        });
+        if (dbUser) {
+          token.id = dbUser.id;
+          token.tier = dbUser.tier;
+        } else {
+          token.id = user.id;
+          token.tier = "free";
+        }
+      }
+
+      // Refresh tier after Stripe payment (call update() on client to trigger this)
+      if (trigger === "update" && token.email) {
+        const dbUser = await prisma.user.findUnique({
+          where: { email: token.email as string },
+        });
+        if (dbUser) {
+          token.id = dbUser.id;
+          token.tier = dbUser.tier;
+        }
+      }
+
       return token;
     },
+
+    // Expose id + tier on session.user
     async session({ session, token }) {
-      if (session.user && token.id) {
-        (session.user as { id?: string }).id = token.id as string;
+      if (session.user) {
+        (session.user as { id?: string; tier?: string }).id = token.id as string;
+        (session.user as { id?: string; tier?: string }).tier = (token.tier as string) ?? "free";
       }
       return session;
     },
   },
+
   pages: {
     signIn: "/login",
   },
