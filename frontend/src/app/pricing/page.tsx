@@ -1,11 +1,15 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
+import { useSession } from "next-auth/react";
+import { useRouter } from "next/navigation";
 import { useI18n } from "@/lib/i18n";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { CheckIcon, XIcon, InfoIcon } from "lucide-react";
+import { CheckIcon, XIcon, InfoIcon, CrownIcon } from "lucide-react";
+import { Tier } from "@/types/stock";
 
 interface FeatureItem {
   text: string;
@@ -68,32 +72,40 @@ const FEATURES: Record<string, { zh: FeatureItem[]; en: FeatureItem[] }> = {
 };
 
 export default function PricingPage() {
+  const { data: session, status } = useSession();
+  const router = useRouter();
   const { t, locale } = useI18n();
   const zh = locale === "zh";
+  const [checkoutLoading, setCheckoutLoading] = useState(false);
+  const [checkoutError, setCheckoutError] = useState<string | null>(null);
 
-  const plans = [
-    {
-      key: "free",
-      name: zh ? "免费版" : "Free",
-      price: "S$0",
-      period: zh ? "永久免费" : "forever",
-      desc: zh ? "基础估值数据入门" : "Get started with basic valuation",
-      cta: zh ? "免费开始" : "Get Started Free",
-      ctaHref: "/dashboard",
-      ctaVariant: "outline" as const,
-    },
-    {
-      key: "pro",
-      name: zh ? "专业版" : "Pro",
-      price: "S$1.99",
-      period: zh ? "/月" : "/month",
-      desc: zh ? "一杯果汁钱，解锁全部功能" : "Price of a juice — unlock everything",
-      cta: zh ? "订阅专业版" : "Subscribe Pro",
-      popular: true,
-      ctaHref: "/login",
-      ctaVariant: "default" as const,
-    },
-  ];
+  const userTier = ((session?.user as { tier?: string })?.tier ?? "free") as Tier;
+  const isPro = userTier === "pro" || userTier === "premium";
+
+  const handleSubscribePro = async () => {
+    if (status === "loading") return;
+
+    if (!session?.user) {
+      router.push("/login?callbackUrl=/pricing");
+      return;
+    }
+
+    setCheckoutLoading(true);
+    setCheckoutError(null);
+    try {
+      const res = await fetch("/api/stripe/checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ plan: "pro" }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to start checkout");
+      if (data.url) window.location.href = data.url;
+    } catch (e) {
+      setCheckoutError(e instanceof Error ? e.message : "Something went wrong");
+      setCheckoutLoading(false);
+    }
+  };
 
   const faqs = [
     { q: t("pricing.faq.q1"), a: t("pricing.faq.a1") },
@@ -148,59 +160,96 @@ export default function PricingPage() {
         </Card>
       </div>
 
+      {checkoutError && (
+        <div className="max-w-3xl mx-auto px-4">
+          <div className="bg-destructive/10 border border-destructive/30 rounded-lg px-4 py-3 text-destructive text-sm">
+            {checkoutError}
+          </div>
+        </div>
+      )}
+
       {/* Plan cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start max-w-3xl mx-auto px-4">
-        {plans.map((plan) => {
-          const features = FEATURES[plan.key][zh ? "zh" : "en"];
-          return (
-            <Card
-              key={plan.key}
-              className={`relative flex flex-col ${
-                plan.popular ? "border-primary border-2 shadow-lg scale-[1.02]" : ""
-              }`}
-            >
-              {plan.popular && (
-                <div className="absolute -top-3 left-1/2 -translate-x-1/2">
-                  <Badge className="bg-primary text-primary-foreground px-3 py-1">
-                    {zh ? "推荐" : "RECOMMENDED"}
-                  </Badge>
-                </div>
-              )}
-              <CardHeader className="pb-4">
-                <div className="font-bold text-lg">{plan.name}</div>
-                <div className="flex items-baseline gap-1 mt-1">
-                  <span className="text-3xl font-extrabold">{plan.price}</span>
-                  <span className="text-muted-foreground text-sm">{plan.period}</span>
-                </div>
-                <p className="text-sm text-muted-foreground mt-1">{plan.desc}</p>
-              </CardHeader>
-              <CardContent className="flex-1 flex flex-col gap-4">
-                <ul className="space-y-2.5 flex-1">
-                  {features.map((f, i) => (
-                    <li key={i} className="flex items-start gap-2 text-sm">
-                      {f.included ? (
-                        <CheckIcon className="h-4 w-4 text-green-500 mt-0.5 flex-shrink-0" />
-                      ) : (
-                        <XIcon className="h-4 w-4 text-muted-foreground/40 mt-0.5 flex-shrink-0" />
-                      )}
-                      <span className={f.included ? "" : "text-muted-foreground/50"}>{f.text}</span>
-                    </li>
-                  ))}
-                </ul>
-                <Link href={plan.ctaHref}>
-                  <Button
-                    variant={plan.ctaVariant}
-                    className={`w-full ${
-                      plan.popular ? "bg-primary text-primary-foreground hover:bg-primary/90" : ""
-                    }`}
-                  >
-                    {plan.cta}
-                  </Button>
-                </Link>
-              </CardContent>
-            </Card>
-          );
-        })}
+        {/* Free plan */}
+        <Card className="relative flex flex-col">
+          <CardHeader className="pb-4">
+            <div className="font-bold text-lg">{zh ? "免费版" : "Free"}</div>
+            <div className="flex items-baseline gap-1 mt-1">
+              <span className="text-3xl font-extrabold">S$0</span>
+              <span className="text-muted-foreground text-sm">{zh ? "永久免费" : "forever"}</span>
+            </div>
+            <p className="text-sm text-muted-foreground mt-1">
+              {zh ? "基础估值数据入门" : "Get started with basic valuation"}
+            </p>
+          </CardHeader>
+          <CardContent className="flex-1 flex flex-col gap-4">
+            <ul className="space-y-2.5 flex-1">
+              {FEATURES.free[zh ? "zh" : "en"].map((f, i) => (
+                <li key={i} className="flex items-start gap-2 text-sm">
+                  {f.included ? (
+                    <CheckIcon className="h-4 w-4 text-green-500 mt-0.5 flex-shrink-0" />
+                  ) : (
+                    <XIcon className="h-4 w-4 text-muted-foreground/40 mt-0.5 flex-shrink-0" />
+                  )}
+                  <span className={f.included ? "" : "text-muted-foreground/50"}>{f.text}</span>
+                </li>
+              ))}
+            </ul>
+            <Link href="/dashboard">
+              <Button variant="outline" className="w-full">
+                {zh ? "免费开始" : "Get Started Free"}
+              </Button>
+            </Link>
+          </CardContent>
+        </Card>
+
+        {/* Pro plan */}
+        <Card className="relative flex flex-col border-primary border-2 shadow-lg scale-[1.02]">
+          <div className="absolute -top-3 left-1/2 -translate-x-1/2">
+            <Badge className="bg-primary text-primary-foreground px-3 py-1">
+              {zh ? "推荐" : "RECOMMENDED"}
+            </Badge>
+          </div>
+          <CardHeader className="pb-4">
+            <div className="font-bold text-lg">{zh ? "专业版" : "Pro"}</div>
+            <div className="flex items-baseline gap-1 mt-1">
+              <span className="text-3xl font-extrabold">S$1.99</span>
+              <span className="text-muted-foreground text-sm">{zh ? "/月" : "/month"}</span>
+            </div>
+            <p className="text-sm text-muted-foreground mt-1">
+              {zh ? "一杯果汁钱，解锁全部功能" : "Price of a juice — unlock everything"}
+            </p>
+          </CardHeader>
+          <CardContent className="flex-1 flex flex-col gap-4">
+            <ul className="space-y-2.5 flex-1">
+              {FEATURES.pro[zh ? "zh" : "en"].map((f, i) => (
+                <li key={i} className="flex items-start gap-2 text-sm">
+                  <CheckIcon className="h-4 w-4 text-green-500 mt-0.5 flex-shrink-0" />
+                  <span>{f.text}</span>
+                </li>
+              ))}
+            </ul>
+
+            {isPro ? (
+              <div className="w-full flex items-center justify-center gap-2 py-2.5 rounded-md bg-green-500/10 border border-green-500/30 text-green-700 dark:text-green-400 text-sm font-medium">
+                <CrownIcon className="h-4 w-4" />
+                {zh ? "你已是 Pro 会员 ✓" : "You're already Pro ✓"}
+              </div>
+            ) : (
+              <Button
+                className="w-full bg-primary text-primary-foreground hover:bg-primary/90"
+                onClick={handleSubscribePro}
+                disabled={checkoutLoading || status === "loading"}
+              >
+                {checkoutLoading
+                  ? (zh ? "跳转中..." : "Redirecting...")
+                  : session?.user
+                  ? (zh ? "订阅专业版" : "Subscribe Pro")
+                  : (zh ? "登录后订阅" : "Sign in to Subscribe")}
+              </Button>
+            )}
+          </CardContent>
+        </Card>
       </div>
 
       {/* Feature comparison table */}
