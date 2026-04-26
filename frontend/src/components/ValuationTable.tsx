@@ -6,7 +6,8 @@ import { useI18n } from "@/lib/i18n";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { StockValuation, Tier } from "@/types/stock";
-import { ArrowUpDown, ArrowUp, ArrowDown, LockIcon } from "lucide-react";
+import { ArrowUpDown, ArrowUp, ArrowDown, LockIcon, DownloadIcon } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
 interface Props {
   data: StockValuation[];
@@ -190,6 +191,31 @@ export default function ValuationTable({ data, userTier = "premium" }: Props) {
     </button>
   );
 
+  const downloadCsv = () => {
+    const headers = ["Ticker", "Company", "Price", "Target Avg", "Target Range", "vs Target %", "Fwd PE", "PEG", "Signal", "DCF Avg", "vs DCF %"];
+    const rows = enriched.map(({ stock, sig }) => [
+      stock.ticker,
+      `"${stock.company_name || ""}"`,
+      stock.current_price?.toFixed(2) ?? "",
+      stock.target_price.avg?.toFixed(2) ?? "",
+      stock.target_price.min != null && stock.target_price.max != null ? `${stock.target_price.min.toFixed(2)}-${stock.target_price.max.toFixed(2)}` : "",
+      stock.deviations.vs_avg_target?.toFixed(1) ?? "",
+      stock.forward_pe.value?.toFixed(1) ?? "",
+      stock.peg_ratio.value?.toFixed(2) ?? "",
+      sig.signal,
+      stock.dcf_fair_value.avg?.toFixed(2) ?? "",
+      stock.deviations.vs_avg_dcf?.toFixed(1) ?? "",
+    ]);
+    const csv = [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `valueinvest-${new Date().toISOString().split("T")[0]}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   if (!data.length) return null;
 
   const signalBadge = (sig: ReturnType<typeof computeSignal>["signal"]) => {
@@ -207,9 +233,17 @@ export default function ValuationTable({ data, userTier = "premium" }: Props) {
     <Card>
       <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
         <CardTitle className="text-lg">{t("table.title")}</CardTitle>
-        <p className="text-xs text-muted-foreground">
-          {zh ? "💡 点击表头可排序" : "💡 Click headers to sort"}
-        </p>
+        <div className="flex items-center gap-3">
+          {canSeeDcf && (
+            <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={downloadCsv}>
+              <DownloadIcon className="h-3 w-3" />
+              CSV
+            </Button>
+          )}
+          <p className="text-xs text-muted-foreground">
+            {zh ? "💡 点击表头可排序" : "💡 Click headers to sort"}
+          </p>
+        </div>
       </CardHeader>
       <CardContent className="p-0">
         <div className="overflow-x-auto">

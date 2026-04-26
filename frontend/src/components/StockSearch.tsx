@@ -11,9 +11,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 interface StockSearchProps {
   onSearch: (symbols: string[]) => void;
   loading?: boolean;
+  externalTags?: string[];
+  onTagsChange?: (tags: string[]) => void;
 }
 
-const POPULAR_STOCKS = [
+export const POPULAR_STOCKS = [
   { symbol: "NVDA", name: "英伟达 NVIDIA", category: "AI/芯片" },
   { symbol: "AAPL", name: "苹果 Apple", category: "科技" },
   { symbol: "MSFT", name: "微软 Microsoft", category: "科技" },
@@ -36,10 +38,16 @@ const POPULAR_STOCKS = [
   { symbol: "SMCI", name: "超微电脑 Super Micro", category: "AI/服务器" },
 ];
 
-export default function StockSearch({ onSearch, loading }: StockSearchProps) {
+export default function StockSearch({ onSearch, loading, externalTags, onTagsChange }: StockSearchProps) {
   const { t } = useI18n();
   const [input, setInput] = useState("");
-  const [tags, setTags] = useState<string[]>([]);
+  const [internalTags, setInternalTags] = useState<string[]>([]);
+  const tags = externalTags ?? internalTags;
+  const setTags = (v: string[] | ((prev: string[]) => string[])) => {
+    const next = typeof v === "function" ? v(tags) : v;
+    if (externalTags !== undefined && onTagsChange) onTagsChange(next);
+    else setInternalTags(next);
+  };
   const [searchQuery, setSearchQuery] = useState("");
   const [remoteResults, setRemoteResults] = useState<
     { symbol: string; name: string; exchange?: string }[]
