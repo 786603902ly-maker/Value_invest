@@ -1,7 +1,7 @@
 "use client";
 
 import {
-  ScatterChart, Scatter, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, Label,
+  ScatterChart, Scatter, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, Label, Cell,
 } from "recharts";
 import { useI18n } from "@/lib/i18n";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -10,33 +10,18 @@ import { StockValuation } from "@/types/stock";
 interface Props { data: StockValuation[]; }
 
 interface Point {
-  x: number; // current price / DCF ratio (1 = fair, <1 = undervalued)
-  y: number; // current price / target price ratio
+  x: number;
+  y: number;
   ticker: string;
   currentPrice?: number;
   dcfAvg: number;
   targetAvg: number;
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const TickerLabel = (props: any) => {
-  const { cx, cy, payload } = props;
-  if (cx == null || cy == null || !payload) return null;
-  return (
-    <g>
-      <text
-        x={cx + 10}
-        y={cy + 4}
-        fill="hsl(var(--foreground))"
-        fontSize={11}
-        fontWeight={600}
-        textAnchor="start"
-      >
-        {payload.ticker}
-      </text>
-    </g>
-  );
-};
+const COLORS = [
+  "#6366f1", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6",
+  "#ec4899", "#14b8a6", "#f97316", "#3b82f6", "#84cc16",
+];
 
 export default function ScatterPlot({ data }: Props) {
   const { t, locale } = useI18n();
@@ -71,13 +56,31 @@ export default function ScatterPlot({ data }: Props) {
     );
   }
 
-  // Axis bounds: center on 1.0 (fair), expand to fit all points
   const allX = chartData.map((d) => d.x);
   const allY = chartData.map((d) => d.y);
-  const xMax = Math.max(1.3, ...allX) * 1.1;
-  const xMin = Math.min(0.7, ...allX) * 0.9;
-  const yMax = Math.max(1.3, ...allY) * 1.1;
-  const yMin = Math.min(0.7, ...allY) * 0.9;
+  const xMax = Math.max(1.3, ...allX) * 1.15;
+  const xMin = Math.min(0.7, ...allX) * 0.85;
+  const yMax = Math.max(1.3, ...allY) * 1.15;
+  const yMin = Math.min(0.7, ...allY) * 0.85;
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const renderLabel = (props: any) => {
+    const { cx, cy, index } = props;
+    if (cx == null || cy == null || index == null) return null;
+    const d = chartData[index];
+    if (!d) return null;
+    return (
+      <text
+        x={cx + 12}
+        y={cy - 8}
+        fill={COLORS[index % COLORS.length]}
+        fontSize={12}
+        fontWeight={700}
+      >
+        {d.ticker}
+      </text>
+    );
+  };
 
   return (
     <Card>
@@ -92,8 +95,18 @@ export default function ScatterPlot({ data }: Props) {
         </CardDescription>
       </CardHeader>
       <CardContent>
+        {/* Color legend */}
+        <div className="flex flex-wrap gap-3 mb-4">
+          {chartData.map((d, i) => (
+            <div key={d.ticker} className="flex items-center gap-1.5 text-xs">
+              <div className="w-3 h-3 rounded-full" style={{ backgroundColor: COLORS[i % COLORS.length] }} />
+              <span className="font-semibold">{d.ticker}</span>
+              <span className="text-muted-foreground">P/DCF {d.x}× · P/T {d.y}×</span>
+            </div>
+          ))}
+        </div>
         <ResponsiveContainer width="100%" height={420}>
-          <ScatterChart margin={{ top: 20, right: 50, bottom: 30, left: 20 }}>
+          <ScatterChart margin={{ top: 20, right: 60, bottom: 30, left: 20 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
             <XAxis
               type="number"
@@ -143,22 +156,17 @@ export default function ScatterPlot({ data }: Props) {
                 );
               }}
             />
-            {/* Fair value lines at 1.0 on both axes */}
             <ReferenceLine x={1} stroke="#10b981" strokeDasharray="4 4" strokeWidth={1.5}>
               <Label value={zh ? "DCF 公允" : "DCF fair"} position="insideTopRight" fontSize={10} fill="#10b981" />
             </ReferenceLine>
             <ReferenceLine y={1} stroke="#3b82f6" strokeDasharray="4 4" strokeWidth={1.5}>
               <Label value={zh ? "目标价公允" : "Target fair"} position="insideTopLeft" fontSize={10} fill="#3b82f6" />
             </ReferenceLine>
-            <Scatter
-              data={chartData}
-              fill="hsl(var(--primary))"
-              stroke="hsl(var(--primary))"
-              strokeWidth={2}
-              shape="circle"
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              label={(props: any) => <TickerLabel {...props} />}
-            />
+            <Scatter data={chartData} label={renderLabel}>
+              {chartData.map((_, i) => (
+                <Cell key={i} fill={COLORS[i % COLORS.length]} stroke={COLORS[i % COLORS.length]} strokeWidth={2} r={7} />
+              ))}
+            </Scatter>
           </ScatterChart>
         </ResponsiveContainer>
       </CardContent>

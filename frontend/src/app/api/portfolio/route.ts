@@ -36,13 +36,13 @@ export async function POST(req: NextRequest) {
   if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
 
   const body = await req.json();
-  const { action, portfolioId, name, ticker, note } = body;
+  const { action, portfolioId, name, ticker, note, tickers } = body;
 
   if (action === "create") {
     // Create a new portfolio
     const count = await prisma.portfolio.count({ where: { userId: user.id } });
     // Pro tier gets all features, free tier is limited to 1 portfolio
-    const maxPortfolios = user.tier === "pro" || user.tier === "premium" ? 10 : 1;
+    const maxPortfolios = user.tier === "pro" || user.tier === "premium" ? 10 : 3;
     if (count >= maxPortfolios) {
       return NextResponse.json(
         { error: `Your plan allows up to ${maxPortfolios} portfolio(s)` },
@@ -51,6 +51,30 @@ export async function POST(req: NextRequest) {
     }
     const portfolio = await prisma.portfolio.create({
       data: { userId: user.id, name: name || "我的投资组合" },
+      include: { items: true },
+    });
+    return NextResponse.json(portfolio);
+  }
+
+  if (action === "createWithTickers" && Array.isArray(tickers)) {
+    const count = await prisma.portfolio.count({ where: { userId: user.id } });
+    const maxPortfolios = user.tier === "pro" || user.tier === "premium" ? 10 : 3;
+    if (count >= maxPortfolios) {
+      return NextResponse.json(
+        { error: `Your plan allows up to ${maxPortfolios} portfolio(s)` },
+        { status: 403 }
+      );
+    }
+    const portfolio = await prisma.portfolio.create({
+      data: {
+        userId: user.id,
+        name: name || "我的投资组合",
+        items: {
+          create: (tickers as string[]).slice(0, 50).map((t: string) => ({
+            ticker: t.toUpperCase(),
+          })),
+        },
+      },
       include: { items: true },
     });
     return NextResponse.json(portfolio);
