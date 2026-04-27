@@ -82,10 +82,8 @@ export const authOptions: NextAuthOptions = {
       return true;
     },
 
-    // Store id + tier in JWT (refreshed from DB on update trigger)
     async jwt({ token, user, trigger }) {
       if (user) {
-        // Look up DB record to get our internal id and tier
         const dbUser = await prisma.user.findUnique({
           where: { email: user.email! },
         });
@@ -96,17 +94,23 @@ export const authOptions: NextAuthOptions = {
           token.id = user.id;
           token.tier = "free";
         }
+        token.tierCheckedAt = Date.now();
       }
 
-      // Refresh tier after Stripe payment (call update() on client to trigger this)
-      if (trigger === "update" && token.email) {
-        const dbUser = await prisma.user.findUnique({
-          where: { email: token.email as string },
-        });
-        if (dbUser) {
-          token.id = dbUser.id;
-          token.tier = dbUser.tier;
+      const TIER_REFRESH_MS = 5 * 60 * 1000;
+      const lastCheck = (token.tierCheckedAt as number) || 0;
+      if (trigger === "update" || Date.now() - lastCheck > TIER_REFRESH_MS) {
+        if (token.email) {
+          const dbUser = await prisma.user.findUnique({
+            where: { email: token.email as string },
+            select: { id: true, tier: true },
+          });
+          if (dbUser) {
+            token.id = dbUser.id;
+            token.tier = dbUser.tier;
+          }
         }
+        token.tierCheckedAt = Date.now();
       }
 
       return token;
