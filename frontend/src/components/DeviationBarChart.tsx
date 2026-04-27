@@ -22,8 +22,6 @@ export default function DeviationBarChart({ data }: Props) {
 
   const chartData = data.flatMap((stock) => {
     const items = [];
-    if (stock.deviations.vs_avg_dcf != null)
-      items.push({ name: `${stock.ticker} vs DCF`, value: stock.deviations.vs_avg_dcf });
     if (stock.deviations.vs_avg_target != null)
       items.push({ name: `${stock.ticker} vs Target`, value: stock.deviations.vs_avg_target });
     return items;

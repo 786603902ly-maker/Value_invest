@@ -39,7 +39,6 @@ export default function MarginOfSafetyChart({ stock }: Props) {
 
   const axes: { axis: string; score: number; mos: number; fairValue: number }[] = [];
 
-  // DCF sources that have valid values
   const validSources = stock.dcf_fair_value.sources.filter((s) => s.value > 0);
   for (const s of validSources.slice(0, 4)) {
     const label = s.model?.replace(/\s*\(.*\)/, "").split(" ").slice(0, 2).join(" ") || s.source;
@@ -51,7 +50,6 @@ export default function MarginOfSafetyChart({ stock }: Props) {
     });
   }
 
-  // DCF average
   if (stock.dcf_fair_value.avg && stock.dcf_fair_value.avg > 0) {
     axes.push({
       axis: zh ? "DCF均值" : "DCF Avg",
@@ -61,7 +59,6 @@ export default function MarginOfSafetyChart({ stock }: Props) {
     });
   }
 
-  // Target price
   if (stock.target_price.avg && stock.target_price.avg > 0) {
     axes.push({
       axis: zh ? "目标价" : "Target",
@@ -71,7 +68,20 @@ export default function MarginOfSafetyChart({ stock }: Props) {
     });
   }
 
-  // Forward PE implied value (sector avg PE * EPS = implied price)
+  if (stock.forward_pe.value && stock.forward_pe.value > 0) {
+    const fpeScore = stock.forward_pe.value < 15 ? 75
+      : stock.forward_pe.value < 20 ? 62
+      : stock.forward_pe.value < 25 ? 50
+      : stock.forward_pe.value < 35 ? 38
+      : 25;
+    axes.push({
+      axis: "Fwd P/E",
+      score: fpeScore,
+      mos: fpeScore - 50,
+      fairValue: stock.forward_pe.value,
+    });
+  }
+
   if (stock.forward_pe.value && stock.forward_pe.sector_avg && stock.forward_pe.value > 0) {
     const impliedPrice = (cp / stock.forward_pe.value) * stock.forward_pe.sector_avg;
     if (impliedPrice > 0) {
@@ -84,7 +94,6 @@ export default function MarginOfSafetyChart({ stock }: Props) {
     }
   }
 
-  // PEG-based score: PEG<1 → high safety, PEG>2 → low safety
   if (stock.peg_ratio.value && stock.peg_ratio.value > 0) {
     const pegMos = Math.round((1 - stock.peg_ratio.value) * 30);
     axes.push({
@@ -109,12 +118,15 @@ export default function MarginOfSafetyChart({ stock }: Props) {
     const d = payload[0]?.payload;
     if (!d) return null;
     const isPeg = d.axis === "PEG";
+    const isFpe = d.axis === "Fwd P/E";
     return (
       <div className="bg-background border rounded-lg shadow-lg p-3 text-sm">
         <p className="font-medium">{d.axis}</p>
         <p className="text-muted-foreground">
           {isPeg
             ? `PEG: ${d.fairValue.toFixed(2)}`
+            : isFpe
+            ? `Fwd P/E: ${d.fairValue.toFixed(1)}`
             : `${zh ? "公允价值" : "Fair value"}: $${d.fairValue.toFixed(2)}`}
         </p>
         <p className={d.mos > 0 ? "text-green-600" : "text-red-600"}>

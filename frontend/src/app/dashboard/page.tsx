@@ -15,6 +15,7 @@ import GaugeChart from "@/components/GaugeChart";
 import BullBearChart from "@/components/BullBearChart";
 import MarginOfSafetyChart from "@/components/MarginOfSafetyChart";
 import ComparisonBarCharts from "@/components/ComparisonBarCharts";
+import TargetRangeChart from "@/components/TargetRangeChart";
 import { Tier, Portfolio } from "@/types/stock";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -323,6 +324,22 @@ function DashboardContent() {
             </TierGate>
           )}
 
+          {/* ======= SECTION 3.5: Multi-stock comparison bar charts (Pro) ======= */}
+          {stocks.length > 1 && (
+            <TierGate
+              userTier={userTier}
+              upgradeText={zh ? "升级 Pro 查看多股对比柱状图" : "Upgrade to Pro for comparison bar charts"}
+            >
+              <div>
+                <div className="flex items-center justify-between mb-3">
+                  <h2 className="text-base font-semibold">{zh ? "多股指标对比" : "Multi-Stock Comparison"}</h2>
+                  <Badge variant="outline" className="text-xs bg-primary/10 text-primary border-primary/30">Pro</Badge>
+                </div>
+                <ComparisonBarCharts data={stocks} />
+              </div>
+            </TierGate>
+          )}
+
           {/* ======= SECTION 4: Per-stock deep dive ======= */}
           {stocks.length > 0 && currentStock && (
             <div className="space-y-5">
@@ -373,7 +390,7 @@ function DashboardContent() {
 
               {/* Per-stock visualizations FIRST, then tables */}
               <div className="space-y-5">
-                {/* Visualization grid: Deviation (free), BullBear (Pro), Radar (Pro) */}
+                {/* Visualization grid: Deviation (free), BullBear (Pro) */}
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                   {/* Deviation Bar (Free) */}
                   <Card>
@@ -401,8 +418,10 @@ function DashboardContent() {
                       </CardContent>
                     </Card>
                   </TierGate>
+                </div>
 
-                  {/* Margin of Safety Radar (Pro) */}
+                {/* Radar + Target Range side by side (Pro) */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                   <TierGate userTier={userTier} upgradeText={zh ? "升级 Pro 查看安全边际雷达" : "Upgrade to Pro for MoS radar"}>
                     <Card>
                       <CardHeader className="pb-2">
@@ -417,21 +436,24 @@ function DashboardContent() {
                       </CardContent>
                     </Card>
                   </TierGate>
-                </div>
 
-                {/* Multi-stock comparison bar charts (Pro) */}
-                <TierGate
-                  userTier={userTier}
-                  upgradeText={zh ? "升级 Pro 查看多股对比柱状图" : "Upgrade to Pro for comparison bar charts"}
-                >
-                  <div>
-                    <div className="flex items-center justify-between mb-3">
-                      <h2 className="text-base font-semibold">{zh ? "多股指标对比" : "Multi-Stock Comparison"}</h2>
-                      <Badge variant="outline" className="text-xs bg-primary/10 text-primary border-primary/30">Pro</Badge>
-                    </div>
-                    <ComparisonBarCharts data={stocks} />
-                  </div>
-                </TierGate>
+                  <TierGate userTier={userTier} upgradeText={zh ? "升级 Pro 查看目标价区间" : "Upgrade to Pro for target range"}>
+                    <Card>
+                      <CardHeader className="pb-2">
+                        <div className="flex items-center justify-between">
+                          <CardTitle className="text-sm">{zh ? "分析师目标价区间" : "Analyst Target Price Range"}</CardTitle>
+                          <Badge variant="outline" className="text-xs bg-primary/10 text-primary border-primary/30">Pro</Badge>
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          {zh ? "当前价与分析师最低/平均/最高目标价对比" : "Current price vs analyst low/avg/high targets"}
+                        </p>
+                      </CardHeader>
+                      <CardContent>
+                        <TargetRangeChart stock={currentStock} />
+                      </CardContent>
+                    </Card>
+                  </TierGate>
+                </div>
 
                 {/* Detail tables AFTER visualizations */}
                 {/* Target Price Detail (Pro) */}

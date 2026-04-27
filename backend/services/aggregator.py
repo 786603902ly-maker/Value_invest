@@ -52,6 +52,15 @@ async def get_full_valuation(symbol: str) -> StockValuation:
                 model=item.get("model"),
             ))
 
+    # Self-computed FCF DCF from yfinance fundamentals
+    fcf_dcf = yf_data.get("fcf_dcf")
+    if fcf_dcf is not None and fcf_dcf > 0:
+        dcf_sources.append(SourceValue(
+            source="ValueInvest (yfinance)",
+            value=fcf_dcf,
+            model="FCF-Based DCF (10yr, 8% growth, 10% discount)",
+        ))
+
     dcf_values = [s.value for s in dcf_sources]
     dcf_summary = MetricSummary(
         sources=dcf_sources,

@@ -245,11 +245,16 @@ export default function DCFDetailTable({ stock }: Props) {
       </div>
 
       {/* Legend */}
-      <div className="pt-2 border-t">
+      <div className="pt-2 border-t space-y-2">
         <p className="text-xs text-muted-foreground">
           {locale === "zh"
             ? "💡 不同DCF模型基于不同假设，建议综合参考。偏差 >20% 通常具有投资意义。"
             : "💡 Different DCF models use different assumptions. Deviations >20% are typically investment-relevant."}
+        </p>
+        <p className="text-xs text-amber-600 dark:text-amber-400">
+          {locale === "zh"
+            ? "⚠️ DCF 估值高度依赖增长率、折现率等假设参数，不同模型间可能存在非常大的偏差。请仅将其作为众多估值指标中的一个参考维度，结合分析师目标价、PEG、远期 P/E 等综合判断。"
+            : "⚠️ DCF valuations are highly sensitive to assumptions (growth rate, discount rate, etc.) and can vary significantly across models. Please use them as just one reference among many — combine with analyst targets, PEG, forward P/E, and other metrics for a complete picture."}
         </p>
       </div>
     </div>

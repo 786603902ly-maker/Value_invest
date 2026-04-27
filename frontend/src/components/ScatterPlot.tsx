@@ -58,10 +58,18 @@ export default function ScatterPlot({ data }: Props) {
 
   const allX = chartData.map((d) => d.x);
   const allY = chartData.map((d) => d.y);
-  const xMax = Math.max(1.3, ...allX) * 1.15;
-  const xMin = Math.min(0.7, ...allX) * 0.85;
-  const yMax = Math.max(1.3, ...allY) * 1.15;
-  const yMin = Math.min(0.7, ...allY) * 0.85;
+  const dataXMin = Math.min(...allX);
+  const dataXMax = Math.max(...allX);
+  const dataYMin = Math.min(...allY);
+  const dataYMax = Math.max(...allY);
+  const xSpread = dataXMax - dataXMin || 0.2;
+  const ySpread = dataYMax - dataYMin || 0.2;
+  const xPad = Math.max(0.05, xSpread * 0.25);
+  const yPad = Math.max(0.05, ySpread * 0.25);
+  const xMin = Math.min(dataXMin - xPad, 0.95);
+  const xMax = Math.max(dataXMax + xPad, 1.05);
+  const yMin = Math.min(dataYMin - yPad, 0.95);
+  const yMax = Math.max(dataYMax + yPad, 1.05);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const renderLabel = (props: any) => {

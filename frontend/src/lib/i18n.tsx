@@ -59,8 +59,8 @@ const translations = {
     "table.analysts": "位分析师",
 
     // Charts
-    "chart.deviation.title": "股价 vs 公允价值偏离度",
-    "chart.deviation.subtitle": "负值 = 被低估（绿色），正值 = 被高估（红色）",
+    "chart.deviation.title": "股价 vs 分析师目标价偏离度",
+    "chart.deviation.subtitle": "负值 = 低于目标价（绿色），正值 = 高于目标价（红色）",
     "chart.deviation.label": "偏离度",
     "chart.scatter.title": "公允价值 vs 分析师目标价",
     "chart.scatter.subtitle": "对角线上方 = 分析师比 DCF 模型更看好",
@@ -80,7 +80,7 @@ const translations = {
 
     // Alerts
     "alerts.title": "价格与估值提醒",
-    "alerts.subtitle": "设置自定义触发条件，当股票达到你的目标估值时收到通知。Pro 和 Premium 订阅用户可用。",
+    "alerts.subtitle": "设置自定义触发条件，当股票达到你的目标估值时通过邮件通知你。Pro 订阅用户可用。",
     "alerts.create": "创建新提醒",
     "alerts.ticker": "股票代码",
     "alerts.metric": "指标",
@@ -236,8 +236,8 @@ const translations = {
     "table.sources": "source(s)",
     "table.analysts": "analysts",
 
-    "chart.deviation.title": "Price vs Fair Value Deviation",
-    "chart.deviation.subtitle": "Negative = undervalued (green), Positive = overvalued (red)",
+    "chart.deviation.title": "Price vs Analyst Target Deviation",
+    "chart.deviation.subtitle": "Negative = below target (green), Positive = above target (red)",
     "chart.deviation.label": "Deviation",
     "chart.scatter.title": "Fair Value vs Target Price",
     "chart.scatter.subtitle": "Above diagonal = analysts more bullish than DCF suggests",
@@ -255,7 +255,7 @@ const translations = {
     "signal.overvalued": "Overvalued",
 
     "alerts.title": "Price & Valuation Alerts",
-    "alerts.subtitle": "Set custom triggers to get notified when stocks hit your target valuations. Available for Pro and Premium subscribers.",
+    "alerts.subtitle": "Set custom triggers to get notified by email when stocks hit your target valuations. Available for Pro subscribers.",
     "alerts.create": "Create New Alert",
     "alerts.ticker": "Ticker",
     "alerts.metric": "Metric",
