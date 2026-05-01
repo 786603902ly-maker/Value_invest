@@ -28,26 +28,20 @@ export async function POST(req: NextRequest) {
     where: { email: session.user.email },
   });
 
+  // Determine the base URL — prefer env var, fall back to request origin
+  const origin = req.headers.get("origin") || req.headers.get("referer")?.replace(/\/$/, "") || "";
+  const baseUrl = (process.env.NEXT_PUBLIC_APP_URL || origin).replace(/\/$/, "");
+
   const checkoutSession = await getStripe().checkout.sessions.create({
     mode: "subscription",
-    // Omitting payment_method_types uses dynamic payment methods — all methods
-    // enabled in your Stripe Dashboard (card, Apple Pay, Google Pay, Alipay,
-    // WeChat Pay, GrabPay, PayNow) are shown automatically.
     customer_email: user?.stripeId ? undefined : session.user.email,
     customer: user?.stripeId || undefined,
     line_items: [{ price: planConfig.priceId, quantity: 1 }],
-    // Collect billing address for tax compliance
     billing_address_collection: "auto",
-    // Pre-fill email
-    ...(session.user.email && !user?.stripeId
-      ? { customer_email: session.user.email }
-      : {}),
-    success_url: `${process.env.NEXT_PUBLIC_APP_URL}/dashboard?upgraded=true`,
-    cancel_url: `${process.env.NEXT_PUBLIC_APP_URL}/pricing`,
+    success_url: `${baseUrl}/dashboard?upgraded=true`,
+    cancel_url: `${baseUrl}/pricing`,
     metadata: { userId: user?.id || "", plan },
-    // Allow promotion codes
     allow_promotion_codes: true,
-    // Show what they're subscribing to
     custom_text: {
       submit: {
         message: "订阅后即可解锁全部 Pro 功能。您可随时取消。",
