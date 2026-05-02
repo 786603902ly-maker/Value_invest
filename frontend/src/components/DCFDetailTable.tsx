@@ -30,6 +30,13 @@ const ANNOTATION_CONFIG: Record<
   DCFAnnotation,
   { label: string; labelEn: string; color: string; desc: string; descEn: string }
 > = {
+  primary: {
+    label: "核心模型 ★",
+    labelEn: "Primary ★",
+    color: "bg-indigo-100 text-indigo-800 border-indigo-300",
+    desc: "两阶段DCF：10年高增长FCF折现 + Gordon增长终值，最核心的估值参考，在加权平均中占50%权重",
+    descEn: "2-Stage DCF: 10-yr high-growth FCF discounting + Gordon Growth terminal value — primary anchor, 50% weight in the weighted average",
+  },
   authoritative: {
     label: "最权威",
     labelEn: "Most Authoritative",
@@ -103,6 +110,7 @@ export default function DCFDetailTable({ stock }: Props) {
   const avg = stock.dcf_fair_value.avg;
   const min = stock.dcf_fair_value.min;
   const max = stock.dcf_fair_value.max;
+  const primarySource = sources.find((s) => s.annotation === "primary");
 
   return (
     <div className="space-y-4">
@@ -110,7 +118,7 @@ export default function DCFDetailTable({ stock }: Props) {
       <div className="grid grid-cols-3 gap-3 p-4 bg-muted/30 rounded-lg">
         <div className="text-center">
           <div className="text-xs text-muted-foreground mb-1">
-            {locale === "zh" ? "DCF 均值" : "DCF Average"}
+            {locale === "zh" ? "DCF 加权均值" : "DCF Weighted Avg"}
           </div>
           <div className="text-lg font-bold">{fmt(avg, stock.currency)}</div>
           {currentPrice != null && avg != null && (
@@ -164,6 +172,7 @@ export default function DCFDetailTable({ stock }: Props) {
             {sources.map((s, i) => {
               const annotation = s.annotation ?? "supplemental";
               const cfg = ANNOTATION_CONFIG[annotation];
+              const isPrimary = annotation === "primary";
               const deviation =
                 currentPrice != null
                   ? ((currentPrice - s.value) / s.value) * 100
@@ -172,7 +181,11 @@ export default function DCFDetailTable({ stock }: Props) {
               return (
                 <tr
                   key={i}
-                  className="border-b last:border-0 hover:bg-muted/20 transition-colors"
+                  className={`border-b last:border-0 transition-colors ${
+                    isPrimary
+                      ? "bg-indigo-50/60 dark:bg-indigo-900/20 hover:bg-indigo-50 dark:hover:bg-indigo-900/30"
+                      : "hover:bg-muted/20"
+                  }`}
                 >
                   <td className="py-3 pr-4">
                     <div className="font-medium">{s.model || "DCF"}</div>
@@ -248,8 +261,8 @@ export default function DCFDetailTable({ stock }: Props) {
       <div className="pt-2 border-t space-y-2">
         <p className="text-xs text-muted-foreground">
           {locale === "zh"
-            ? "💡 不同DCF模型基于不同假设，建议综合参考。偏差 >20% 通常具有投资意义。"
-            : "💡 Different DCF models use different assumptions. Deviations >20% are typically investment-relevant."}
+            ? `💡 ★ 两阶段DCF为核心模型，在加权均值中占50%权重；其余模型均分剩余50%。偏差 >20% 通常具有投资意义。`
+            : `💡 ★ The 2-Stage DCF is the primary model, contributing 50% of the weighted average; all other models share the remaining 50%. Deviations >20% are typically investment-relevant.`}
         </p>
         <p className="text-xs text-amber-600 dark:text-amber-400">
           {locale === "zh"

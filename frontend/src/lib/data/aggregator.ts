@@ -12,27 +12,34 @@ function safeAvg(values: (number | undefined)[]): number | undefined {
 }
 
 /**
- * Conservative-weighted average DCF:
- * - The "conservative but reasonable" anchor value gets >50% weight
- * - Anchor = the conservative FCF DCF if available; else the lowest reliable value
- * - Other reliable values share the remaining weight equally
- * This reflects a conservative investor's preference.
+ * Weighted average DCF:
+ * - If a "primary" 2-stage DCF is reliable, it gets 50% weight
+ * - All other reliable values share the remaining 50% equally
+ * - Fallback: conservative FCF DCF at 55% if no primary model available
  */
 function conservativeWeightedAvg(sources: SourceValue[]): number | undefined {
   const reliable = sources.filter((s) => s.reliable !== false);
   if (reliable.length === 0) return undefined;
   if (reliable.length === 1) return reliable[0].value;
 
-  // Find anchor: prefer the dedicated "conservative" annotated model
+  // Primary anchor: 2-stage DCF always gets 50% weight
+  const primary = reliable.find((s) => s.annotation === "primary");
+  if (primary) {
+    const others = reliable.filter((s) => s !== primary);
+    if (others.length === 0) return Math.round(primary.value * 100) / 100;
+    const otherWeight = 0.50 / others.length;
+    const weighted = primary.value * 0.50 + others.reduce((sum, s) => sum + s.value * otherWeight, 0);
+    return Math.round(weighted * 100) / 100;
+  }
+
+  // Fallback: conservative FCF DCF gets 55%
   let anchor = reliable.find((s) => s.annotation === "conservative" && s.model?.includes("FCF"));
   if (!anchor) {
-    // Fallback: the lowest non-pessimistic (not Graham Number floor) value
     const nonFloor = reliable.filter((s) => s.annotation !== "pessimistic");
     const pool = nonFloor.length > 0 ? nonFloor : reliable;
     anchor = pool.reduce((min, s) => (s.value < min.value ? s : min), pool[0]);
   }
 
-  // Weight scheme: anchor 55%, remaining 45% shared equally across others
   const others = reliable.filter((s) => s !== anchor);
   if (others.length === 0) return Math.round(anchor.value * 100) / 100;
 

@@ -1,4 +1,4 @@
-export type DCFAnnotation = "authoritative" | "optimistic" | "pessimistic" | "classic" | "supplemental" | "conservative";
+export type DCFAnnotation = "primary" | "authoritative" | "optimistic" | "pessimistic" | "classic" | "supplemental" | "conservative";
 
 export interface ComputedDCF {
   source: string;
@@ -6,6 +6,40 @@ export interface ComputedDCF {
   methodology: string;
   value: number;
   annotation: DCFAnnotation;
+}
+
+/**
+ * 2-Stage DCF Model (primary valuation anchor)
+ * Stage 1: n years of high-growth FCF at company growth rate
+ * Stage 2: Gordon Growth terminal value (perpetual stable growth)
+ * Fair Value = PV(Stage 1 FCFs) + PV(Terminal Value)
+ */
+export function twoStageDCF(
+  freeCashflow: number,
+  stage1GrowthRate: number,
+  sharesOutstanding: number,
+  stage1Years = 10,
+  discountRate = 0.10,
+  terminalGrowthRate = 0.025,
+): number | undefined {
+  if (freeCashflow <= 0 || sharesOutstanding <= 0) return undefined;
+  if (discountRate <= terminalGrowthRate) return undefined;
+
+  const g1 = Math.max(-0.10, Math.min(stage1GrowthRate, 0.30));
+
+  // Stage 1: Present value of FCFs over growth years
+  let totalPV = 0;
+  let lastFCF = freeCashflow;
+  for (let t = 1; t <= stage1Years; t++) {
+    lastFCF = lastFCF * (1 + g1);
+    totalPV += lastFCF / Math.pow(1 + discountRate, t);
+  }
+
+  // Stage 2: Terminal Value via Gordon Growth Model
+  const terminalValue = (lastFCF * (1 + terminalGrowthRate)) / (discountRate - terminalGrowthRate);
+  const pvTerminal = terminalValue / Math.pow(1 + discountRate, stage1Years);
+
+  return Math.round(((totalPV + pvTerminal) / sharesOutstanding) * 100) / 100;
 }
 
 /**
@@ -209,6 +243,20 @@ export function buildDCFModels(params: {
     (params.earningsGrowthRate != null ? params.earningsGrowthRate * 100 : undefined);
   const growthRate = params.earningsGrowthRate ??
     (params.earningsGrowthPct != null ? params.earningsGrowthPct / 100 : undefined);
+
+  // 0. 2-Stage DCF — PRIMARY model, always gets 50% weight in the weighted average
+  if (params.freeCashflow && params.sharesOutstanding && growthRate != null) {
+    const val = twoStageDCF(params.freeCashflow, growthRate, params.sharesOutstanding);
+    if (val && val > 0) {
+      results.push({
+        source: "ValueInvest",
+        model: "两阶段 DCF (2-Stage DCF)",
+        methodology: `阶段1: ${Math.round((Math.max(-0.10, Math.min(growthRate, 0.30))) * 100)}% 增长率，连续10年FCF折现 | 阶段2: Gordon增长模型终值(永续增长2.5%) | 折现率10%`,
+        value: val,
+        annotation: "primary",
+      });
+    }
+  }
 
   // 1. FCF DCF — most authoritative if FCF data available
   if (params.freeCashflow && params.sharesOutstanding && growthRate != null) {
