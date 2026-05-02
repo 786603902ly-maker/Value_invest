@@ -110,8 +110,6 @@ export default function DCFDetailTable({ stock }: Props) {
   const avg = stock.dcf_fair_value.avg;
   const min = stock.dcf_fair_value.min;
   const max = stock.dcf_fair_value.max;
-  const primarySource = sources.find((s) => s.annotation === "primary");
-
   return (
     <div className="space-y-4">
       {/* Summary row */}
