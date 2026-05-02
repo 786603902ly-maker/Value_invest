@@ -7,6 +7,7 @@ export interface YahooData {
   companyName?: string;
   currentPrice?: number;
   currency?: string;
+  financialCurrency?: string;
   targetHigh?: number;
   targetLow?: number;
   targetMean?: number;
@@ -79,11 +80,15 @@ export async function getYahooData(symbol: string): Promise<YahooData> {
     const bookValuePerShare: number | undefined = stats?.bookValue ?? undefined;
     const dividendPerShare: number | undefined = summary?.dividendRate ?? undefined;
 
+    const financialCurrency: string | undefined =
+      financial?.financialCurrency ?? price?.financialCurrency ?? undefined;
+
     return {
       ticker: symbol.toUpperCase(),
       companyName: price?.shortName || price?.longName,
       currentPrice: financial?.currentPrice ?? price?.regularMarketPrice ?? undefined,
       currency: price?.currency ?? "USD",
+      financialCurrency,
       targetHigh: financial?.targetHighPrice ?? undefined,
       targetLow: financial?.targetLowPrice ?? undefined,
       targetMean: financial?.targetMeanPrice ?? undefined,

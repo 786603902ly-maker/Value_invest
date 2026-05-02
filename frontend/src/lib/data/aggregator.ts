@@ -1,6 +1,7 @@
 import { getYahooData } from "./yahoo";
 import { getDcf, getTargetConsensus, getRating, getRatios, getKeyMetrics, getIncomeStatement, getEnterpriseValue } from "./fmp";
 import { getAVOverview } from "./alpha-vantage";
+import { getExchangeRate } from "./currency";
 import { buildDCFModels } from "./dcf-models";
 import type { StockValuation, SourceValue, TargetPriceSource } from "@/types/stock";
 
@@ -90,16 +91,52 @@ export async function getFullValuation(symbol: string): Promise<StockValuation> 
     ? fmpEV.enterpriseValue - fmpEV.marketCap
     : undefined;
 
+  // --- Currency & ADR adjustment for total-company figures (FCF, EBITDA) ---
+  const priceCurrency = (yahooData.currency || "USD").toUpperCase();
+  const finCurrency = (yahooData.financialCurrency || priceCurrency).toUpperCase();
+  const needsCurrencyConversion = finCurrency !== priceCurrency;
+
+  let fxRate = 1;
+  if (needsCurrencyConversion) {
+    fxRate = await getExchangeRate(finCurrency, priceCurrency);
+  }
+
+  // Convert total-company figures from financial currency to price currency
+  let adjustedFCF = yahooData.freeCashflow;
+  let adjustedEbitda = ebitda;
+  if (needsCurrencyConversion) {
+    if (adjustedFCF != null) adjustedFCF = adjustedFCF * fxRate;
+    if (adjustedEbitda != null) adjustedEbitda = adjustedEbitda * fxRate;
+  }
+
+  // For ADRs, sharesOutstanding = total ordinary shares, not ADR-equivalent.
+  // Compute effective trading-unit shares = marketCap / currentPrice.
+  // This handles ADR ratio automatically (e.g., 1 TSM ADR = 5 ordinary shares).
+  let effectiveShares = yahooData.sharesOutstanding;
+  if (yahooData.marketCap && yahooData.currentPrice && yahooData.currentPrice > 0) {
+    const impliedShares = Math.round(yahooData.marketCap / yahooData.currentPrice);
+    if (effectiveShares && needsCurrencyConversion) {
+      effectiveShares = impliedShares;
+    } else if (effectiveShares && impliedShares > 0) {
+      const ratio = effectiveShares / impliedShares;
+      if (ratio > 1.5 || ratio < 0.67) {
+        effectiveShares = impliedShares;
+      }
+    } else if (!effectiveShares) {
+      effectiveShares = impliedShares;
+    }
+  }
+
   // --- Build computed DCF models ---
   const computedModels = buildDCFModels({
-    freeCashflow: yahooData.freeCashflow,
+    freeCashflow: adjustedFCF,
     eps,
     bvps,
     earningsGrowthPct,
     earningsGrowthRate,
-    sharesOutstanding: yahooData.sharesOutstanding,
+    sharesOutstanding: effectiveShares,
     dividendPerShare,
-    ebitda,
+    ebitda: adjustedEbitda,
     netDebt,
   });
 

@@ -67,7 +67,7 @@ export function fcfDCF(
   years = 5
 ): number | undefined {
   if (freeCashflow <= 0 || sharesOutstanding <= 0) return undefined;
-  const g = Math.max(-0.2, Math.min(growthRate, 0.5));
+  const g = Math.max(-0.1, Math.min(growthRate, 0.30));
   let totalPV = 0;
   let lastFCF = freeCashflow;
   for (let y = 1; y <= years; y++) {

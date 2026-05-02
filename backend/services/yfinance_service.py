@@ -2,6 +2,31 @@ import yfinance as yf
 from typing import Optional
 
 
+def _get_fx_rate(from_ccy: str, to_ccy: str) -> float:
+    """Get exchange rate from one currency to another via yfinance."""
+    if from_ccy == to_ccy:
+        return 1.0
+    try:
+        pair = yf.Ticker(f"{from_ccy}{to_ccy}=X")
+        rate = pair.info.get("regularMarketPrice") or pair.info.get("previousClose")
+        if rate and rate > 0:
+            return float(rate)
+    except Exception:
+        pass
+    approx = {
+        "TWDUSD": 0.031, "KRWUSD": 0.00073, "JPYUSD": 0.0065,
+        "GBPUSD": 1.27, "EURUSD": 1.08, "CNYUSD": 0.14,
+        "INRUSD": 0.012, "HKDUSD": 0.128, "BRLUSD": 0.20,
+    }
+    key = f"{from_ccy}{to_ccy}"
+    if key in approx:
+        return approx[key]
+    inv = f"{to_ccy}{from_ccy}"
+    if inv in approx:
+        return 1.0 / approx[inv]
+    return 1.0
+
+
 def _compute_fcf_dcf(ticker_obj) -> Optional[float]:
     """Compute a simple FCF-based DCF fair value using yfinance fundamentals."""
     try:
@@ -25,6 +50,20 @@ def _compute_fcf_dcf(ticker_obj) -> Optional[float]:
         shares = info.get("sharesOutstanding")
         if not shares or shares <= 0:
             return None
+
+        price_ccy = (info.get("currency") or "USD").upper()
+        fin_ccy = (info.get("financialCurrency") or price_ccy).upper()
+        fx = _get_fx_rate(fin_ccy, price_ccy) if fin_ccy != price_ccy else 1.0
+        avg_fcf *= fx
+
+        market_cap = info.get("marketCap")
+        current_price = info.get("currentPrice") or info.get("regularMarketPrice")
+        if market_cap and current_price and current_price > 0:
+            implied = market_cap / current_price
+            ratio = shares / implied if implied > 0 else 1.0
+            if ratio > 1.5 or ratio < 0.67:
+                shares = implied
+
         growth = 0.08
         discount = 0.10
         terminal_growth = 0.03
