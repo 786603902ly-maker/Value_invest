@@ -25,7 +25,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const { ticker, metric, condition, threshold } = await req.json();
+  const { ticker, metric, condition, threshold, frequency, notifyVia } = await req.json();
 
   const user = await prisma.user.findUnique({
     where: { email: session.user.email },
@@ -36,7 +36,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "User not found" }, { status: 404 });
   }
 
-  // Tier check
   if (user.tier === "free") {
     return NextResponse.json(
       { error: "Alerts require Pro plan (S$1.99/mo)" },
@@ -44,18 +43,6 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Pro tier: unlimited alerts
-  const alertLimits: Record<string, number> = { pro: 9999, premium: 9999 };
-  const limit = alertLimits[user.tier] || 0;
-
-  if (user.alerts.length >= limit) {
-    return NextResponse.json(
-      { error: `Alert limit reached for ${user.tier} plan` },
-      { status: 403 }
-    );
-  }
-
-  // Ensure stock exists in watchlist
   let stock = await prisma.stock.findFirst({
     where: { userId: user.id, ticker: ticker.toUpperCase() },
   });
@@ -66,6 +53,9 @@ export async function POST(req: NextRequest) {
     });
   }
 
+  const validFrequencies = ["hourly", "daily", "weekly"];
+  const validChannels = ["email", "inapp"];
+
   const alert = await prisma.alert.create({
     data: {
       userId: user.id,
@@ -73,6 +63,8 @@ export async function POST(req: NextRequest) {
       metric,
       condition,
       threshold: parseFloat(threshold),
+      frequency: validFrequencies.includes(frequency) ? frequency : "daily",
+      notifyVia: validChannels.includes(notifyVia) ? notifyVia : "email",
     },
   });
 

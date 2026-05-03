@@ -9,18 +9,34 @@ datasource db {
 }
 
 model User {
-  id             String      @id @default(cuid())
-  email          String      @unique
+  id             String              @id @default(cuid())
+  email          String              @unique
   name           String?
   password       String?
-  tier           String      @default("free")
+  tier           String              @default("free")
   stripeId       String?
   telegramChatId String?
   watchlist      Stock[]
   alerts         Alert[]
   portfolios     Portfolio[]
-  createdAt      DateTime    @default(now())
-  updatedAt      DateTime    @updatedAt
+  notifications  AlertNotification[]
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+}
+
+model AlertNotification {
+  id           String   @id @default(cuid())
+  alertId      String
+  alert        Alert    @relation(fields: [alertId], references: [id], onDelete: Cascade)
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  ticker       String
+  metric       String
+  currentValue Float
+  threshold    Float
+  condition    String
+  read         Boolean  @default(false)
+  createdAt    DateTime @default(now())
 }
 
 model Stock {
@@ -34,16 +50,20 @@ model Stock {
 }
 
 model Alert {
-  id        String   @id @default(cuid())
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  stockId   String
-  stock     Stock    @relation(fields: [stockId], references: [id], onDelete: Cascade)
-  metric    String
-  condition String
-  threshold Float
-  active    Boolean  @default(true)
-  createdAt DateTime @default(now())
+  id             String              @id @default(cuid())
+  userId         String
+  user           User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  stockId        String
+  stock          Stock               @relation(fields: [stockId], references: [id], onDelete: Cascade)
+  metric         String
+  condition      String
+  threshold      Float
+  active         Boolean             @default(true)
+  frequency      String              @default("daily")
+  notifyVia      String              @default("email")
+  lastNotifiedAt DateTime?
+  createdAt      DateTime            @default(now())
+  notifications  AlertNotification[]
 }
 
 model Portfolio {

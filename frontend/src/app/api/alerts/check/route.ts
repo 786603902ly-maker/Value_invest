@@ -2,6 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { sendAlertEmail } from "@/lib/resend";
 
+const FREQUENCY_MS: Record<string, number> = {
+  hourly: 60 * 60 * 1000,
+  daily: 24 * 60 * 60 * 1000,
+  weekly: 7 * 24 * 60 * 60 * 1000,
+};
+
 export async function POST(req: NextRequest) {
   const authHeader = req.headers.get("authorization");
   const cronSecret = process.env.CRON_SECRET || "valueinvest-cron-2024";
@@ -18,7 +24,19 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ checked: 0, triggered: 0 });
   }
 
-  const tickers = Array.from(new Set(alerts.map((a) => a.stock.ticker)));
+  // Filter to only alerts whose frequency cooldown has elapsed
+  const now = Date.now();
+  const dueAlerts = alerts.filter((a) => {
+    const cooldown = FREQUENCY_MS[a.frequency] ?? FREQUENCY_MS.daily;
+    const lastMs = a.lastNotifiedAt ? new Date(a.lastNotifiedAt).getTime() : 0;
+    return now - lastMs >= cooldown;
+  });
+
+  if (dueAlerts.length === 0) {
+    return NextResponse.json({ checked: 0, triggered: 0, skipped: alerts.length });
+  }
+
+  const tickers = Array.from(new Set(dueAlerts.map((a) => a.stock.ticker)));
   const valuationMap: Record<string, Record<string, number | null>> = {};
 
   const backendUrl = process.env.PYTHON_BACKEND_URL || "http://localhost:8000";
@@ -40,30 +58,32 @@ export async function POST(req: NextRequest) {
         };
       }
     } catch {
-      // skip
+      // skip ticker
     }
   }
 
-  const triggered: { email: string; alerts: { ticker: string; metric: string; condition: string; threshold: number; currentValue: number }[] }[] = [];
+  type TriggeredAlert = { ticker: string; metric: string; condition: string; threshold: number; currentValue: number };
+  const emailBatch: { email: string; alerts: TriggeredAlert[] }[] = [];
+  const inappRecords: { alertId: string; userId: string; ticker: string; metric: string; currentValue: number; threshold: number; condition: string }[] = [];
+  const notifiedIds: string[] = [];
 
-  for (const alert of alerts) {
+  for (const alert of dueAlerts) {
     const vals = valuationMap[alert.stock.ticker];
     if (!vals) continue;
 
     const current = vals[alert.metric];
     if (current == null) continue;
 
-    const fired =
-      alert.condition === "below"
-        ? current <= alert.threshold
-        : current >= alert.threshold;
+    const fired = alert.condition === "below" ? current <= alert.threshold : current >= alert.threshold;
+    if (!fired) continue;
 
-    if (fired) {
-      const email = alert.user.email;
-      let entry = triggered.find((t) => t.email === email);
+    notifiedIds.push(alert.id);
+
+    if (alert.notifyVia === "email") {
+      let entry = emailBatch.find((e) => e.email === alert.user.email);
       if (!entry) {
-        entry = { email, alerts: [] };
-        triggered.push(entry);
+        entry = { email: alert.user.email, alerts: [] };
+        emailBatch.push(entry);
       }
       entry.alerts.push({
         ticker: alert.stock.ticker,
@@ -72,10 +92,21 @@ export async function POST(req: NextRequest) {
         threshold: alert.threshold,
         currentValue: current,
       });
+    } else {
+      inappRecords.push({
+        alertId: alert.id,
+        userId: alert.userId,
+        ticker: alert.stock.ticker,
+        metric: alert.metric,
+        currentValue: current,
+        threshold: alert.threshold,
+        condition: alert.condition,
+      });
     }
   }
 
-  for (const entry of triggered) {
+  // Send emails
+  for (const entry of emailBatch) {
     try {
       await sendAlertEmail(entry.email, entry.alerts);
     } catch (e) {
@@ -83,9 +114,25 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // Create in-app notifications
+  if (inappRecords.length > 0) {
+    await prisma.alertNotification.createMany({ data: inappRecords });
+  }
+
+  // Update lastNotifiedAt for all fired alerts
+  if (notifiedIds.length > 0) {
+    await prisma.alert.updateMany({
+      where: { id: { in: notifiedIds } },
+      data: { lastNotifiedAt: new Date() },
+    });
+  }
+
+  const total = emailBatch.reduce((s, e) => s + e.alerts.length, 0) + inappRecords.length;
+
   return NextResponse.json({
-    checked: alerts.length,
-    triggered: triggered.reduce((sum, e) => sum + e.alerts.length, 0),
-    emails: triggered.length,
+    checked: dueAlerts.length,
+    triggered: total,
+    emails: emailBatch.length,
+    inapp: inappRecords.length,
   });
 }

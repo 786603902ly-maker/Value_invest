@@ -11,7 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Tier } from "@/types/stock";
 import {
   BellRingIcon, Trash2Icon, MailIcon, CrownIcon,
-  LockIcon, PlusIcon, PowerIcon,
+  LockIcon, PlusIcon, PowerIcon, MonitorIcon, CheckCheckIcon, BellIcon,
 } from "lucide-react";
 import Link from "next/link";
 
@@ -21,8 +21,21 @@ interface AlertRecord {
   condition: string;
   threshold: number;
   active: boolean;
+  frequency: string;
+  notifyVia: string;
   createdAt: string;
   stock: { ticker: string };
+}
+
+interface InAppNotification {
+  id: string;
+  ticker: string;
+  metric: string;
+  condition: string;
+  currentValue: number;
+  threshold: number;
+  read: boolean;
+  createdAt: string;
 }
 
 export default function AlertsPage() {
@@ -35,6 +48,7 @@ export default function AlertsPage() {
   const isPro = userTier === "pro" || userTier === "premium";
 
   const [alerts, setAlerts] = useState<AlertRecord[]>([]);
+  const [notifications, setNotifications] = useState<InAppNotification[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
@@ -43,6 +57,8 @@ export default function AlertsPage() {
     metric: "current_price",
     condition: "below",
     threshold: "",
+    frequency: "daily",
+    notifyVia: "email",
   });
 
   const metricOptions = [
@@ -53,14 +69,32 @@ export default function AlertsPage() {
     { value: "peg_ratio", label: t("metric.pegRatio") },
   ];
 
+  const frequencyOptions = [
+    { value: "hourly", label: zh ? "每小时一次" : "Hourly" },
+    { value: "daily", label: zh ? "每天一次（默认）" : "Daily (default)" },
+    { value: "weekly", label: zh ? "每周一次" : "Weekly" },
+  ];
+
+  const channelOptions = [
+    { value: "email", label: zh ? "📧 邮件" : "📧 Email" },
+    { value: "inapp", label: zh ? "🖥️ 网页端" : "🖥️ In-app" },
+  ];
+
   const loadAlerts = useCallback(async () => {
     if (!session?.user) return;
     setLoading(true);
     try {
-      const res = await fetch("/api/alerts");
-      if (res.ok) {
-        const data = await res.json();
+      const [alertsRes, notifRes] = await Promise.all([
+        fetch("/api/alerts"),
+        fetch("/api/alerts/notifications"),
+      ]);
+      if (alertsRes.ok) {
+        const data = await alertsRes.json();
         setAlerts(Array.isArray(data) ? data : []);
+      }
+      if (notifRes.ok) {
+        const data = await notifRes.json();
+        setNotifications(Array.isArray(data) ? data : []);
       }
     } catch {
       setError(zh ? "加载提醒失败" : "Failed to load alerts");
@@ -90,13 +124,15 @@ export default function AlertsPage() {
           metric: form.metric,
           condition: form.condition,
           threshold: form.threshold,
+          frequency: form.frequency,
+          notifyVia: form.notifyVia,
         }),
       });
       if (!res.ok) {
         const data = await res.json();
         throw new Error(data.error || "Failed to create alert");
       }
-      setForm({ ticker: "", metric: "current_price", condition: "below", threshold: "" });
+      setForm({ ticker: "", metric: "current_price", condition: "below", threshold: "", frequency: "daily", notifyVia: "email" });
       await loadAlerts();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Something went wrong");
@@ -116,6 +152,24 @@ export default function AlertsPage() {
     } catch {
       setError(zh ? "删除失败" : "Failed to delete");
     }
+  };
+
+  const markAllRead = async () => {
+    await fetch("/api/alerts/notifications", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ markAllRead: true }),
+    });
+    setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+  };
+
+  const markRead = async (id: string) => {
+    await fetch("/api/alerts/notifications", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ notificationId: id }),
+    });
+    setNotifications((prev) => prev.map((n) => n.id === id ? { ...n, read: true } : n));
   };
 
   if (status === "loading") {
@@ -138,8 +192,8 @@ export default function AlertsPage() {
           <h1 className="text-2xl font-bold mb-2">{zh ? "价格提醒 — Pro 专属功能" : "Price Alerts — Pro Feature"}</h1>
           <p className="text-muted-foreground">
             {zh
-              ? "升级到 Pro（S$1.99/月）即可设置无限价格提醒，当股票达到你的目标估值时，通过邮件即时通知。"
-              : "Upgrade to Pro (S$1.99/mo) to set unlimited price alerts. Get notified by email when stocks hit your target valuations."}
+              ? "升级到 Pro（S$1.99/月）即可设置无限价格提醒，通过邮件或网页端通知你。"
+              : "Upgrade to Pro (S$1.99/mo) to set unlimited price alerts via email or in-app."}
           </p>
         </div>
         <div className="space-y-3 text-left max-w-sm mx-auto">
@@ -149,11 +203,11 @@ export default function AlertsPage() {
           </div>
           <div className="flex items-center gap-3 text-sm">
             <MailIcon className="h-4 w-4 text-primary flex-shrink-0" />
-            <span>{zh ? "邮件即时推送通知" : "Instant email notifications"}</span>
+            <span>{zh ? "邮件 / 网页端双渠道推送" : "Email & in-app notifications"}</span>
           </div>
           <div className="flex items-center gap-3 text-sm">
             <PowerIcon className="h-4 w-4 text-primary flex-shrink-0" />
-            <span>{zh ? "支持 5 种指标触发条件" : "5 metric trigger conditions"}</span>
+            <span>{zh ? "自定义频率：每小时/每天/每周" : "Custom frequency: hourly / daily / weekly"}</span>
           </div>
         </div>
         <Link href="/pricing">
@@ -166,14 +220,16 @@ export default function AlertsPage() {
     );
   }
 
+  const unreadCount = notifications.filter((n) => !n.read).length;
+
   return (
     <div className="space-y-6 max-w-4xl mx-auto">
       <div>
         <h1 className="text-2xl font-bold mb-1">{t("alerts.title")}</h1>
         <p className="text-muted-foreground text-sm">
           {zh
-            ? "设置自定义触发条件，当股票达到你的目标估值时通过邮件通知你。"
-            : "Set custom triggers to get notified by email when stocks hit your target valuations."}
+            ? "设置自定义触发条件，通过邮件或网页端通知你。"
+            : "Set custom triggers — get notified by email or in-app when conditions are met."}
         </p>
       </div>
 
@@ -184,23 +240,6 @@ export default function AlertsPage() {
         </div>
       )}
 
-      {/* Notification info */}
-      <Card className="border-primary/20 bg-primary/5">
-        <CardContent className="p-4 flex items-start gap-3">
-          <MailIcon className="h-5 w-5 text-primary flex-shrink-0 mt-0.5" />
-          <div>
-            <p className="text-sm font-medium mb-1">
-              {zh ? "邮件推送通知" : "Email Push Notifications"}
-            </p>
-            <p className="text-xs text-muted-foreground">
-              {zh
-                ? `提醒触发后会发送至你的登录邮箱 (${session.user?.email})。系统每小时检查一次所有活跃提醒。`
-                : `Triggered alerts are sent to your login email (${session.user?.email}). The system checks all active alerts hourly.`}
-            </p>
-          </div>
-        </CardContent>
-      </Card>
-
       {/* Create alert form */}
       <Card>
         <CardHeader>
@@ -209,8 +248,9 @@ export default function AlertsPage() {
             {t("alerts.create")}
           </CardTitle>
         </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+        <CardContent className="space-y-4">
+          {/* Row 1: ticker, metric, condition, threshold */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <div>
               <label className="block text-xs text-muted-foreground mb-1">{t("alerts.ticker")}</label>
               <Input
@@ -252,7 +292,39 @@ export default function AlertsPage() {
                 placeholder={form.metric === "current_price" ? "120.00" : "-20"}
               />
             </div>
-            <div className="flex items-end">
+          </div>
+
+          {/* Row 2: frequency, notifyVia, submit */}
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-3 items-end">
+            <div>
+              <label className="block text-xs text-muted-foreground mb-1">
+                {zh ? "通知频率" : "Frequency"}
+              </label>
+              <select
+                value={form.frequency}
+                onChange={(e) => setForm({ ...form, frequency: e.target.value })}
+                className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm"
+              >
+                {frequencyOptions.map((opt) => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs text-muted-foreground mb-1">
+                {zh ? "通知方式" : "Notify via"}
+              </label>
+              <select
+                value={form.notifyVia}
+                onChange={(e) => setForm({ ...form, notifyVia: e.target.value })}
+                className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm"
+              >
+                {channelOptions.map((opt) => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
+            </div>
+            <div>
               <Button
                 onClick={createAlert}
                 disabled={creating || !form.ticker.trim() || !form.threshold}
@@ -262,8 +334,80 @@ export default function AlertsPage() {
               </Button>
             </div>
           </div>
+
+          {/* Channel hint */}
+          <p className="text-xs text-muted-foreground">
+            {form.notifyVia === "email"
+              ? (zh
+                ? `📧 触发后发送至 ${session.user?.email}，频率受"通知频率"控制，不会重复打扰。`
+                : `📧 Sent to ${session.user?.email} when triggered. Frequency controls how often you'll be re-notified.`)
+              : (zh
+                ? "🖥️ 触发记录将显示在本页下方的【网页端提醒】面板中，无需查收邮件。"
+                : "🖥️ Triggered alerts appear in the In-app Notifications panel below — no email needed.")}
+          </p>
         </CardContent>
       </Card>
+
+      {/* In-app notifications panel */}
+      {notifications.length > 0 && (
+        <Card className={unreadCount > 0 ? "border-primary/40 bg-primary/5" : ""}>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-lg flex items-center gap-2">
+                <BellIcon className="h-5 w-5" />
+                {zh ? "网页端提醒" : "In-App Notifications"}
+                {unreadCount > 0 && (
+                  <Badge variant="destructive" className="text-xs px-1.5">
+                    {unreadCount}
+                  </Badge>
+                )}
+              </CardTitle>
+              {unreadCount > 0 && (
+                <Button size="sm" variant="ghost" onClick={markAllRead} className="gap-1.5 text-xs">
+                  <CheckCheckIcon className="h-3.5 w-3.5" />
+                  {zh ? "全部标为已读" : "Mark all read"}
+                </Button>
+              )}
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              {notifications.slice(0, 20).map((n) => {
+                const metricLabel = metricOptions.find((m) => m.value === n.metric)?.label ?? n.metric;
+                const conditionLabel = n.condition === "below" ? t("alerts.fallsBelow") : t("alerts.risesAbove");
+                const timeStr = new Date(n.createdAt).toLocaleString(locale === "zh" ? "zh-CN" : "en-US", {
+                  month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
+                });
+                return (
+                  <div
+                    key={n.id}
+                    onClick={() => !n.read && markRead(n.id)}
+                    className={`flex items-center justify-between p-3 rounded-lg border transition-colors cursor-pointer ${
+                      n.read
+                        ? "opacity-60 bg-muted/20"
+                        : "border-primary/30 bg-primary/5 hover:bg-primary/10"
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      {!n.read && <div className="w-2 h-2 rounded-full bg-primary flex-shrink-0" />}
+                      <div>
+                        <span className="font-bold font-mono text-sm">{n.ticker}</span>
+                        <span className="text-sm text-muted-foreground ml-2">
+                          {metricLabel} {conditionLabel}{" "}
+                          <span className="text-foreground font-semibold">{n.threshold}</span>
+                          {zh ? "，当前值：" : " · now: "}
+                          <span className="text-primary font-semibold">{n.currentValue.toFixed(2)}</span>
+                        </span>
+                      </div>
+                    </div>
+                    <span className="text-xs text-muted-foreground flex-shrink-0 ml-4">{timeStr}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Active alerts list */}
       <Card>
@@ -284,34 +428,47 @@ export default function AlertsPage() {
             </div>
           ) : (
             <div className="space-y-2">
-              {alerts.map((alert) => (
-                <div
-                  key={alert.id}
-                  className={`flex items-center justify-between p-4 rounded-lg border transition-colors ${
-                    alert.active ? "hover:bg-accent/30" : "opacity-50"
-                  }`}
-                >
-                  <div className="flex items-center gap-4">
-                    <span className="font-bold font-mono">{alert.stock.ticker}</span>
-                    <span className="text-sm text-muted-foreground">
-                      {metricOptions.find((m) => m.value === alert.metric)?.label}{" "}
-                      {alert.condition === "below" ? t("alerts.fallsBelow") : t("alerts.risesAbove")}{" "}
-                      <span className="text-primary font-semibold">{alert.threshold}</span>
-                    </span>
-                    <Badge variant={alert.active ? "success" : "secondary"} className="text-[10px]">
-                      {alert.active ? "ON" : "OFF"}
-                    </Badge>
-                  </div>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="text-muted-foreground hover:text-red-600"
-                    onClick={() => deleteAlert(alert.id)}
+              {alerts.map((alert) => {
+                const freqLabel = frequencyOptions.find((f) => f.value === alert.frequency)?.label ?? alert.frequency;
+                return (
+                  <div
+                    key={alert.id}
+                    className={`flex items-center justify-between p-4 rounded-lg border transition-colors ${
+                      alert.active ? "hover:bg-accent/30" : "opacity-50"
+                    }`}
                   >
-                    <Trash2Icon className="h-4 w-4" />
-                  </Button>
-                </div>
-              ))}
+                    <div className="flex items-center gap-3 flex-wrap">
+                      <span className="font-bold font-mono">{alert.stock.ticker}</span>
+                      <span className="text-sm text-muted-foreground">
+                        {metricOptions.find((m) => m.value === alert.metric)?.label}{" "}
+                        {alert.condition === "below" ? t("alerts.fallsBelow") : t("alerts.risesAbove")}{" "}
+                        <span className="text-primary font-semibold">{alert.threshold}</span>
+                      </span>
+                      <div className="flex items-center gap-1.5">
+                        <Badge variant="outline" className="text-[10px] gap-1">
+                          {alert.notifyVia === "email"
+                            ? <><MailIcon className="h-3 w-3" />{zh ? "邮件" : "Email"}</>
+                            : <><MonitorIcon className="h-3 w-3" />{zh ? "网页" : "In-app"}</>}
+                        </Badge>
+                        <Badge variant="outline" className="text-[10px]">
+                          {freqLabel.replace("（默认）", "").replace(" (default)", "")}
+                        </Badge>
+                        <Badge variant={alert.active ? "success" : "secondary"} className="text-[10px]">
+                          {alert.active ? "ON" : "OFF"}
+                        </Badge>
+                      </div>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="text-muted-foreground hover:text-red-600 flex-shrink-0"
+                      onClick={() => deleteAlert(alert.id)}
+                    >
+                      <Trash2Icon className="h-4 w-4" />
+                    </Button>
+                  </div>
+                );
+              })}
             </div>
           )}
         </CardContent>
