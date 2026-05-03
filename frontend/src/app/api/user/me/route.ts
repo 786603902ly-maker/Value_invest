@@ -3,10 +3,6 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 
-/**
- * GET /api/user/me — returns current user's tier from DB.
- * Called by the pricing page after Stripe checkout success to verify tier upgrade.
- */
 export async function GET() {
   const session = await getServerSession(authOptions);
   if (!session?.user?.email) {
@@ -15,7 +11,7 @@ export async function GET() {
 
   const user = await prisma.user.findUnique({
     where: { email: session.user.email },
-    select: { id: true, email: true, name: true, tier: true, createdAt: true },
+    select: { id: true, email: true, name: true, tier: true, stripeId: true, createdAt: true },
   });
 
   if (!user) {
@@ -28,5 +24,7 @@ export async function GET() {
     name: user.name,
     tier: user.tier,
     isPro: user.tier === "pro" || user.tier === "premium",
+    hasSubscription: !!user.stripeId,
+    createdAt: user.createdAt,
   });
 }

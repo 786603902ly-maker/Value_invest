@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useState, useCallback, type ReactNode } from "react";
+import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from "react";
 
 export type Locale = "zh" | "en";
 
@@ -11,6 +11,7 @@ const translations = {
     "nav.alerts": "价格提醒",
     "nav.pricing": "订阅方案",
     "nav.login": "登录",
+    "nav.account": "账户",
     "nav.language": "EN",
 
     // Landing
@@ -192,6 +193,7 @@ const translations = {
     "nav.alerts": "Alerts",
     "nav.pricing": "Pricing",
     "nav.login": "Login",
+    "nav.account": "Account",
     "nav.language": "中文",
 
     "landing.title1": "Smarter Stock Valuation",
@@ -377,7 +379,17 @@ const I18nContext = createContext<I18nContextValue>({
 });
 
 export function I18nProvider({ children }: { children: ReactNode }) {
-  const [locale, setLocale] = useState<Locale>("zh");
+  const [locale, setLocaleState] = useState<Locale>("zh");
+
+  useEffect(() => {
+    const saved = typeof window !== "undefined" ? localStorage.getItem("locale") : null;
+    if (saved === "en" || saved === "zh") setLocaleState(saved);
+  }, []);
+
+  const setLocale = useCallback((l: Locale) => {
+    setLocaleState(l);
+    if (typeof window !== "undefined") localStorage.setItem("locale", l);
+  }, []);
 
   const t = useCallback(
     (key: TranslationKey): string => {

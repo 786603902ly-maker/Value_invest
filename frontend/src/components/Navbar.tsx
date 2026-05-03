@@ -6,7 +6,7 @@ import { useSession, signOut } from "next-auth/react";
 import { useI18n } from "@/lib/i18n";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { UserIcon, LogOutIcon, CrownIcon } from "lucide-react";
+import { UserIcon, LogOutIcon, CrownIcon, SettingsIcon } from "lucide-react";
 import { useState, useRef, useEffect } from "react";
 
 export default function Navbar() {
@@ -121,6 +121,15 @@ export default function Navbar() {
                       className="flex items-center gap-2 px-3 py-2 text-sm hover:bg-accent transition-colors"
                     >
                       {zh ? "我的投资组合" : "My Portfolios"}
+                    </Link>
+
+                    <Link
+                      href="/account"
+                      onClick={() => setMenuOpen(false)}
+                      className="flex items-center gap-2 px-3 py-2 text-sm hover:bg-accent transition-colors"
+                    >
+                      <SettingsIcon className="h-4 w-4" />
+                      {zh ? "账户设置" : "Account Settings"}
                     </Link>
 
                     <button
