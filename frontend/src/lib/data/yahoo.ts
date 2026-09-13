@@ -23,8 +23,13 @@ export interface YahooData {
   // For DCF models
   sharesOutstanding?: number;
   freeCashflow?: number;
+  operatingCashflow?: number;
+  totalRevenue?: number;
+  ebitda?: number;
   earningsGrowthRate?: number;  // decimal, e.g. 0.15
   revenueGrowthRate?: number;
+  /** Analyst long-range (+5y) earnings growth estimate, decimal. */
+  analystLongTermGrowth?: number;
   eps?: number;
   bookValuePerShare?: number;
   dividendPerShare?: number;
@@ -49,18 +54,27 @@ export async function getYahooData(symbol: string): Promise<YahooData> {
     const summary = quote.summaryDetail;
     const earningsTrend = quote.earningsTrend;
 
-    // Earnings growth: try multiple sources
-    let earningsGrowthRate: number | undefined = financial?.earningsGrowth ?? undefined;
-    if (earningsGrowthRate == null && earningsTrend?.trend) {
+    // Most-recent-period YoY earnings growth. Kept as ONE input to the growth
+    // normalization, never as the sole ten-year compounding assumption.
+    const earningsGrowthRate: number | undefined = financial?.earningsGrowth ?? undefined;
+
+    // Analyst long-range growth is tracked separately so the normalizer can use
+    // it as an independent vote alongside the realized historical CAGRs.
+    let analystLongTermGrowth: number | undefined;
+    if (earningsTrend?.trend) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const fiveYr = earningsTrend.trend.find((t: any) => t.period === "+5y");
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const oneYr = earningsTrend.trend.find((t: any) => t.period === "+1y");
-      earningsGrowthRate = fiveYr?.growth ?? oneYr?.growth ?? undefined;
+      const raw = fiveYr?.growth ?? oneYr?.growth;
+      if (typeof raw === "number" && isFinite(raw)) analystLongTermGrowth = raw;
     }
 
     const revenueGrowthRate: number | undefined = financial?.revenueGrowth ?? undefined;
     const freeCashflow: number | undefined = financial?.freeCashflow ?? undefined;
+    const operatingCashflow: number | undefined = financial?.operatingCashflow ?? undefined;
+    const totalRevenue: number | undefined = financial?.totalRevenue ?? undefined;
+    const ebitda: number | undefined = financial?.ebitda ?? undefined;
     const sharesOutstanding: number | undefined = stats?.sharesOutstanding ?? undefined;
     const forwardPE: number | undefined = summary?.forwardPE ?? stats?.forwardPE ?? undefined;
 
@@ -103,8 +117,12 @@ export async function getYahooData(symbol: string): Promise<YahooData> {
       fiftyTwoWeekLow: summary?.fiftyTwoWeekLow ?? undefined,
       sharesOutstanding,
       freeCashflow,
+      operatingCashflow,
+      totalRevenue,
+      ebitda,
       earningsGrowthRate,
       revenueGrowthRate,
+      analystLongTermGrowth,
       eps,
       bookValuePerShare,
       dividendPerShare,

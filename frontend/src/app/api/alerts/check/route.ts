@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { sendAlertEmail } from "@/lib/resend";
+import { getFullValuation } from "@/lib/data/aggregator";
 
 const FREQUENCY_MS: Record<string, number> = {
   hourly: 60 * 60 * 1000,
@@ -39,24 +40,21 @@ export async function POST(req: NextRequest) {
   const tickers = Array.from(new Set(dueAlerts.map((a) => a.stock.ticker)));
   const valuationMap: Record<string, Record<string, number | null>> = {};
 
-  const backendUrl = process.env.PYTHON_BACKEND_URL || "http://localhost:8000";
+  // Use the same valuation pipeline the dashboard renders. Previously this hit a
+  // separate Python service whose DCF was a single hardcoded-assumption model,
+  // so an alert could fire on a fair value the user never saw on the page.
   for (const ticker of tickers) {
     try {
-      const res = await fetch(`${backendUrl}/api/valuation/${ticker}`, {
-        signal: AbortSignal.timeout(30000),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        valuationMap[ticker] = {
-          current_price: data.current_price ?? null,
-          dcf_deviation: data.deviations?.vs_avg_dcf ?? null,
-          target_deviation: data.deviations?.vs_avg_target ?? null,
-          forward_pe: data.forward_pe?.value ?? null,
-          peg_ratio: data.peg_ratio?.value ?? null,
-          dcf_fair_value: data.dcf_fair_value?.avg ?? null,
-          target_price: data.target_price?.avg ?? null,
-        };
-      }
+      const data = await getFullValuation(ticker);
+      valuationMap[ticker] = {
+        current_price: data.current_price ?? null,
+        dcf_deviation: data.deviations?.vs_avg_dcf ?? null,
+        target_deviation: data.deviations?.vs_avg_target ?? null,
+        forward_pe: data.forward_pe?.value ?? null,
+        peg_ratio: data.peg_ratio?.value ?? null,
+        dcf_fair_value: data.dcf_fair_value?.avg ?? null,
+        target_price: data.target_price?.avg ?? null,
+      };
     } catch {
       // skip ticker
     }
