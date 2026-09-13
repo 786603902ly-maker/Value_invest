@@ -7,7 +7,8 @@
     "build": "next build",
     "vercel-build": "prisma migrate deploy && next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "valuation:selftest": "tsx scripts/valuation-selftest.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",
@@ -48,6 +49,7 @@
     "postcss": "^8",
     "prisma": "^5.22.0",
     "tailwindcss": "^3.4.1",
+    "tsx": "^4.23.13",
     "typescript": "^5"
   }
 }

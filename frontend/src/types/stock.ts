@@ -6,7 +6,9 @@ export interface SourceValue {
   model?: string;
   methodology?: string;
   annotation?: DCFAnnotation;
-  reliable?: boolean; // false = value is outside sane analyst range; excluded from avg
+  reliable?: boolean; // false = flagged as an outlier; excluded from the blend
+  /** Base weight in the blended fair value, before renormalization. */
+  weight?: number;
 }
 
 export interface TargetPriceSource {
@@ -41,6 +43,37 @@ export interface PEGRatio {
   value?: number;
 }
 
+/**
+ * Transparency payload for the fair-value blend: which inputs were normalized,
+ * how far, and how much the models actually agree with each other.
+ */
+export interface ValuationQuality {
+  confidence: "high" | "medium" | "low";
+  years_of_data?: number;
+  history_provider?: string;
+  model_count?: number;
+  /** (P75 - P25) / median across the reliable model values. */
+  dispersion?: number;
+  fair_value_low?: number;
+  fair_value_high?: number;
+  normalized_fcf?: number;
+  ttm_fcf?: number;
+  owner_earnings?: number;
+  normalized_eps?: number;
+  ttm_eps?: number;
+  growth_rate_used?: number;
+  growth_rate_raw?: number;
+  discount_rate_used?: number;
+  terminal_growth_used?: number;
+  fcf_volatility?: number;
+  earnings_volatility?: number;
+  capex_spike?: boolean;
+  capex_intensity_ttm?: number;
+  capex_intensity_median?: number;
+  growth_sources?: { label: string; value: number }[];
+  adjustments?: string[];
+}
+
 export interface Deviations {
   vs_avg_dcf?: number;
   vs_avg_target?: number;
@@ -57,6 +90,7 @@ export interface StockValuation {
   forward_pe: ForwardPE;
   peg_ratio: PEGRatio;
   recommendation?: string;
+  valuation_quality?: ValuationQuality;
   deviations: Deviations;
   last_updated?: string;
 }

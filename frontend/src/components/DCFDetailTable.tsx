@@ -1,6 +1,6 @@
 "use client";
 
-import { StockValuation, DCFAnnotation } from "@/types/stock";
+import { StockValuation, DCFAnnotation, ValuationQuality } from "@/types/stock";
 import { useI18n } from "@/lib/i18n";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -34,8 +34,8 @@ const ANNOTATION_CONFIG: Record<
     label: "核心模型 ★",
     labelEn: "Primary ★",
     color: "bg-indigo-100 text-indigo-800 border-indigo-300",
-    desc: "两阶段DCF：10年高增长FCF折现 + Gordon增长终值，最核心的估值参考，在加权平均中占50%权重",
-    descEn: "2-Stage DCF: 10-yr high-growth FCF discounting + Gordon Growth terminal value — primary anchor, 50% weight in the weighted average",
+    desc: "两阶段DCF：以归一化自由现金流为起点，5年增长后线性衰减至永续增长率，折现率按历史现金流波动率调整。加权均值中权重最高（26%）",
+    descEn: "2-Stage DCF on normalized free cash flow: 5 growth years fading to perpetual growth, discount rate scaled to historical cash-flow volatility. Highest single weight in the blend (26%)",
   },
   authoritative: {
     label: "最权威",
@@ -48,8 +48,8 @@ const ANNOTATION_CONFIG: Record<
     label: "保守下限",
     labelEn: "Conservative Floor",
     color: "bg-orange-100 text-orange-800 border-orange-200",
-    desc: "格雷厄姆数字提供安全边际下限，适合极度保守的投资者参考",
-    descEn: "Graham Number provides a margin-of-safety floor for very conservative investors",
+    desc: "格雷厄姆数字是1930年代的防御型选股筛选线，非估值模型。仅作下限标记，权重 2%",
+    descEn: "The Graham Number is a 1930s defensive screening threshold, not a valuation model. Kept as a floor marker at 2% weight",
   },
   classic: {
     label: "经典公式",
@@ -62,8 +62,8 @@ const ANNOTATION_CONFIG: Record<
     label: "成长乐观",
     labelEn: "Growth Optimistic",
     color: "bg-green-100 text-green-800 border-green-200",
-    desc: "彼得·林奇公式：PEG=1时的理论价值，适合高成长股参考",
-    descEn: "Peter Lynch formula: fair value when PEG=1, best for growth stocks",
+    desc: "彼得·林奇公式：PEG=1时的理论价值。原为快速筛选标尺，权重 2%",
+    descEn: "Peter Lynch formula: fair value at PEG=1. Designed as a quick screen, so 2% weight",
   },
   supplemental: {
     label: "补充参考",
@@ -83,10 +83,160 @@ const ANNOTATION_CONFIG: Record<
     label: "保守基准",
     labelEn: "Conservative Base",
     color: "bg-amber-100 text-amber-800 border-amber-200",
-    desc: "面向保守价值投资者的基准：更高折现率、更低增长假设，平均值权重 >50%",
-    descEn: "Conservative benchmark with higher discount rate and lower growth assumption — gets >50% weight in the average",
+    desc: "下行情景：折现率 +200bp、增速打7折、终值增长2% — 代表假设空间的悲观一角，权重 10%",
+    descEn: "Downside case: +200bp discount rate, growth cut 30%, 2% terminal growth — the pessimistic corner of the assumption space, 10% weight",
   },
 };
+
+
+const CONFIDENCE_CONFIG = {
+  high: {
+    label: "高置信度",
+    labelEn: "High confidence",
+    color: "bg-green-100 text-green-800 border-green-300 dark:bg-green-900/30 dark:text-green-300",
+  },
+  medium: {
+    label: "中等置信度",
+    labelEn: "Medium confidence",
+    color: "bg-yellow-100 text-yellow-800 border-yellow-300 dark:bg-yellow-900/30 dark:text-yellow-300",
+  },
+  low: {
+    label: "低置信度",
+    labelEn: "Low confidence",
+    color: "bg-red-100 text-red-800 border-red-300 dark:bg-red-900/30 dark:text-red-300",
+  },
+} as const;
+
+function bn(v?: number): string {
+  if (v == null) return "—";
+  const abs = Math.abs(v);
+  if (abs >= 1e9) return `${(v / 1e9).toFixed(1)}B`;
+  if (abs >= 1e6) return `${(v / 1e6).toFixed(1)}M`;
+  return v.toFixed(0);
+}
+
+function rate(v?: number): string {
+  if (v == null) return "—";
+  return `${(v * 100).toFixed(1)}%`;
+}
+
+/**
+ * Shows what the fair value was actually built from. The point estimate alone
+ * hides the two things that decide whether it means anything: which inputs were
+ * normalized away from the trailing snapshot, and how much the models agree.
+ */
+function QualityPanel({ q, locale }: { q: ValuationQuality; locale: string }) {
+  const zh = locale === "zh";
+  const cfg = CONFIDENCE_CONFIG[q.confidence];
+
+  const rows: { label: string; labelEn: string; ttm: string; used: string }[] = [];
+  if (q.ttm_fcf != null || q.normalized_fcf != null) {
+    rows.push({
+      label: "自由现金流",
+      labelEn: "Free cash flow",
+      ttm: bn(q.ttm_fcf),
+      used: bn(q.normalized_fcf),
+    });
+  }
+  if (q.ttm_eps != null || q.normalized_eps != null) {
+    rows.push({
+      label: "每股收益 EPS",
+      labelEn: "EPS",
+      ttm: q.ttm_eps != null ? q.ttm_eps.toFixed(2) : "—",
+      used: q.normalized_eps != null ? q.normalized_eps.toFixed(2) : "—",
+    });
+  }
+  if (q.growth_rate_raw != null || q.growth_rate_used != null) {
+    rows.push({
+      label: "增长率",
+      labelEn: "Growth rate",
+      ttm: rate(q.growth_rate_raw),
+      used: rate(q.growth_rate_used),
+    });
+  }
+
+  return (
+    <div className="rounded-lg border border-dashed p-4 space-y-3 bg-muted/20">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-sm font-semibold">
+          {zh ? "估值输入归一化" : "Input normalization"}
+        </span>
+        <Badge variant="outline" className={`text-xs ${cfg.color}`}>
+          {zh ? cfg.label : cfg.labelEn}
+        </Badge>
+        {q.capex_spike && (
+          <Badge
+            variant="outline"
+            className="text-xs bg-blue-100 text-blue-800 border-blue-300 dark:bg-blue-900/30 dark:text-blue-300"
+          >
+            {zh ? "资本开支高峰期" : "Capex build-out"}
+          </Badge>
+        )}
+        <span className="text-xs text-muted-foreground ml-auto">
+          {zh
+            ? `${q.years_of_data ?? 0} 年历史 · ${q.model_count ?? 0} 个模型入选`
+            : `${q.years_of_data ?? 0} yrs of history · ${q.model_count ?? 0} models used`}
+        </span>
+      </div>
+
+      {rows.length > 0 && (
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="text-muted-foreground">
+              <th className="text-left font-medium py-1">{zh ? "输入项" : "Input"}</th>
+              <th className="text-right font-medium py-1">
+                {zh ? "最近12个月报告值" : "Trailing 12M reported"}
+              </th>
+              <th className="text-right font-medium py-1">
+                {zh ? "模型采用值（归一化）" : "Used by models (normalized)"}
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r, i) => (
+              <tr key={i} className="border-t">
+                <td className="py-1">{zh ? r.label : r.labelEn}</td>
+                <td className="py-1 text-right font-mono text-muted-foreground">{r.ttm}</td>
+                <td className="py-1 text-right font-mono font-medium">{r.used}</td>
+              </tr>
+            ))}
+            <tr className="border-t">
+              <td className="py-1">{zh ? "折现率 / 终值增长" : "Discount / terminal growth"}</td>
+              <td className="py-1 text-right font-mono text-muted-foreground">
+                {zh ? "固定 10% / 2.5%" : "was fixed 10% / 2.5%"}
+              </td>
+              <td className="py-1 text-right font-mono font-medium">
+                {rate(q.discount_rate_used)} / {rate(q.terminal_growth_used)}
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      )}
+
+      {(q.fcf_volatility != null || q.earnings_volatility != null) && (
+        <div className="text-xs text-muted-foreground">
+          {zh ? "历史波动系数（变异系数）：" : "Historical volatility (coeff. of variation): "}
+          {q.fcf_volatility != null && `FCF ${q.fcf_volatility.toFixed(2)}`}
+          {q.fcf_volatility != null && q.earnings_volatility != null && " · "}
+          {q.earnings_volatility != null &&
+            `${zh ? "盈利" : "earnings"} ${q.earnings_volatility.toFixed(2)}`}
+          {zh ? " — 波动越大，折现率越高" : " — higher volatility raises the discount rate"}
+        </div>
+      )}
+
+      {!!q.adjustments?.length && (
+        <ul className="space-y-1">
+          {q.adjustments.map((a, i) => (
+            <li key={i} className="text-xs text-muted-foreground leading-relaxed flex gap-1.5">
+              <span className="text-primary/60">·</span>
+              <span>{a}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
 
 interface Props {
   stock: StockValuation;
@@ -110,6 +260,11 @@ export default function DCFDetailTable({ stock }: Props) {
   const avg = stock.dcf_fair_value.avg;
   const min = stock.dcf_fair_value.min;
   const max = stock.dcf_fair_value.max;
+  const quality = stock.valuation_quality;
+  // Weights are renormalized over the models that passed the outlier guard, so
+  // the column adds up to 100% of what actually drove the number.
+  const totalReliableWeight =
+    sources.reduce((sum, s) => (s.reliable === false ? sum : sum + (s.weight ?? 0)), 0) || 1;
   return (
     <div className="space-y-4">
       {/* Summary row */}
@@ -132,17 +287,34 @@ export default function DCFDetailTable({ stock }: Props) {
         </div>
         <div className="text-center">
           <div className="text-xs text-muted-foreground mb-1">
-            {locale === "zh" ? "悲观下限" : "Pessimistic"}
+            {locale === "zh" ? "模型集中区间 (P25–P75)" : "Model core range (P25–P75)"}
           </div>
-          <div className="text-lg font-bold text-orange-600">{fmt(min, stock.currency)}</div>
+          <div className="text-lg font-bold">
+            {quality?.fair_value_low != null && quality?.fair_value_high != null
+              ? `${fmt(quality.fair_value_low, stock.currency)} – ${fmt(
+                  quality.fair_value_high,
+                  stock.currency
+                )}`
+              : "N/A"}
+          </div>
+          {quality?.dispersion != null && (
+            <div className="text-xs text-muted-foreground mt-1">
+              {locale === "zh" ? "模型离散度 " : "dispersion "}
+              {(quality.dispersion * 100).toFixed(0)}%
+            </div>
+          )}
         </div>
         <div className="text-center">
           <div className="text-xs text-muted-foreground mb-1">
-            {locale === "zh" ? "乐观上限" : "Optimistic"}
+            {locale === "zh" ? "全模型区间" : "Full model range"}
           </div>
-          <div className="text-lg font-bold text-green-600">{fmt(max, stock.currency)}</div>
+          <div className="text-lg font-bold">
+            {fmt(min, stock.currency)} – {fmt(max, stock.currency)}
+          </div>
         </div>
       </div>
+
+      {quality && <QualityPanel q={quality} locale={locale} />}
 
       {/* Detail rows */}
       <div className="overflow-x-auto">
@@ -160,6 +332,9 @@ export default function DCFDetailTable({ stock }: Props) {
               </th>
               <th className="text-right py-2 pr-4 font-medium">
                 {locale === "zh" ? "与现价偏离" : "vs Current"}
+              </th>
+              <th className="text-right py-2 pr-4 font-medium">
+                {locale === "zh" ? "权重" : "Weight"}
               </th>
               <th className="text-center py-2 font-medium">
                 {locale === "zh" ? "参考类型" : "Type"}
@@ -230,6 +405,13 @@ export default function DCFDetailTable({ stock }: Props) {
                       "—"
                     )}
                   </td>
+                  <td className="py-3 pr-4 text-right font-mono text-xs text-muted-foreground">
+                    {s.weight != null
+                      ? s.reliable === false
+                        ? "0%"
+                        : `${((s.weight / totalReliableWeight) * 100).toFixed(0)}%`
+                      : "—"}
+                  </td>
                   <td className="py-3 text-center">
                     <Tooltip>
                       <TooltipTrigger asChild>
@@ -259,13 +441,13 @@ export default function DCFDetailTable({ stock }: Props) {
       <div className="pt-2 border-t space-y-2">
         <p className="text-xs text-muted-foreground">
           {locale === "zh"
-            ? `💡 ★ 两阶段DCF为核心模型，在加权均值中占50%权重；其余模型均分剩余50%。偏差 >20% 通常具有投资意义。`
-            : `💡 ★ The 2-Stage DCF is the primary model, contributing 50% of the weighted average; all other models share the remaining 50%. Deviations >20% are typically investment-relevant.`}
+            ? `💡 加权均值按模型权重计算，权重反映每个模型对"持续经营企业价值"的证据强度：现金流折现类占主导，单一比率类（格雷厄姆数字、Lynch）仅作参考标尺。所有输入均已按多年历史归一化，不以单一季度定十年假设。`
+            : `💡 The weighted average uses per-model weights reflecting how much evidence each model carries about a going concern: cash-flow models dominate, single-ratio rules of thumb (Graham Number, Lynch) are context markers only. All inputs are normalized across multiple years rather than taken from one quarter.`}
         </p>
         <p className="text-xs text-amber-600 dark:text-amber-400">
           {locale === "zh"
-            ? "⚠️ DCF 估值高度依赖增长率、折现率等假设参数，不同模型间可能存在非常大的偏差。请仅将其作为众多估值指标中的一个参考维度，结合分析师目标价、PEG、远期 P/E 等综合判断。"
-            : "⚠️ DCF valuations are highly sensitive to assumptions (growth rate, discount rate, etc.) and can vary significantly across models. Please use them as just one reference among many — combine with analyst targets, PEG, forward P/E, and other metrics for a complete picture."}
+            ? "⚠️ DCF 估值高度依赖增长率、折现率等假设参数，不同模型间可能存在非常大的偏差。置信度标签与模型离散度反映的是模型之间的一致程度，不代表估值正确。请仅将其作为众多估值指标中的一个参考维度，结合分析师目标价、PEG、远期 P/E 等综合判断。"
+            : "⚠️ DCF valuations are highly sensitive to assumptions (growth rate, discount rate, etc.) and can vary significantly across models. The confidence label and dispersion measure how much the models agree with each other, not whether they are right. Use them as just one reference among many — combine with analyst targets, PEG, forward P/E, and other metrics."}
         </p>
       </div>
     </div>
