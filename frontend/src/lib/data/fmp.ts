@@ -128,28 +128,52 @@ export async function getDcf(symbol: string): Promise<FmpDcf[]> {
   return results;
 }
 
-/**
- * Fetch FMP financial growth data for EV/EBITDA based fair value computation
- */
-export async function getEnterpriseValue(symbol: string): Promise<{
-  evToEbitda?: number;
+export interface EnterpriseValuePoint {
+  /** Fiscal year of the observation. */
+  year: number;
   marketCap?: number;
   enterpriseValue?: number;
-} | null> {
-  const data = await fmpFetch<Array<Record<string, number | null>>>(
+}
+
+export interface EnterpriseValueHistory {
+  /** Latest observation, used for the net-debt bridge. */
+  latest?: EnterpriseValuePoint;
+  /** Up to 10 annual observations, oldest first — used to derive the multiple
+   *  the market has historically paid for THIS business's EBITDA. */
+  series: EnterpriseValuePoint[];
+}
+
+/**
+ * Enterprise value history. Ten years rather than one, because a flat sector
+ * multiple applied to every company is a large hidden haircut on businesses
+ * the market has consistently paid more for; the company's own historical
+ * median multiple is an actual observation instead of an assumption.
+ */
+export async function getEnterpriseValue(symbol: string): Promise<EnterpriseValueHistory | null> {
+  const data = await fmpFetch<Array<Record<string, number | string | null>>>(
     `/enterprise-values/${symbol}`,
-    { limit: "1" }
+    { limit: "10" }
   );
   if (!Array.isArray(data) || data.length === 0) return null;
-  const r = data[0];
-  const parse = (v: number | null | undefined): number | undefined => {
-    if (v == null || !isFinite(v)) return undefined;
+  const parse = (v: unknown): number | undefined => {
+    if (typeof v !== "number" || !isFinite(v)) return undefined;
     return v;
   };
-  return {
-    marketCap: parse(r.marketCapitalization as number),
-    enterpriseValue: parse(r.enterpriseValue as number),
-  };
+  const series: EnterpriseValuePoint[] = data
+    .map((r): EnterpriseValuePoint | null => {
+      const year = parseInt(String(r.date ?? "").slice(0, 4), 10);
+      if (!isFinite(year)) return null;
+      return {
+        year,
+        marketCap: parse(r.marketCapitalization),
+        enterpriseValue: parse(r.enterpriseValue),
+      };
+    })
+    .filter((r): r is EnterpriseValuePoint => r != null)
+    .sort((a, b) => a.year - b.year);
+
+  if (!series.length) return null;
+  return { latest: series[series.length - 1], series };
 }
 
 /**

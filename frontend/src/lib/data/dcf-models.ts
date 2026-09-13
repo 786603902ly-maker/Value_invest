@@ -7,40 +7,54 @@ export type DCFAnnotation =
   | "supplemental"
   | "conservative";
 
+/**
+ * What quantity a model estimates. This is the distinction the blend depends on.
+ *
+ * A weighted average is only meaningful over estimates of the SAME quantity.
+ * Mixing a going-concern intrinsic value with a no-growth floor produces
+ * neither: the floors are not wrong, they are answering a different question
+ * ("what is this worth if growth stops / if it liquidates"), and averaging them
+ * into the central estimate applies a permanent, invisible haircut to every
+ * growing business. Measured on representative large-cap inputs, that haircut
+ * was 17-28% below the cash-flow anchor before this split existed.
+ *
+ * So: `value` models set the fair value, `floor` models set the margin-of-safety
+ * band shown beside it, and `reference` models are displayed as context only.
+ */
+export type DCFRole = "value" | "floor" | "reference";
+
 export interface ComputedDCF {
   source: string;
   model: string;
   methodology: string;
   value: number;
   annotation: DCFAnnotation;
-  /** Base weight in the blended fair value, before renormalization. */
+  role: DCFRole;
+  /** Base weight within its own role group, before renormalization. */
   weight: number;
 }
 
 /**
- * Base weights. They express how much evidence each model carries about the
- * value of a going concern, not how conservative it is:
- *  - cash-flow models dominate, because they value the actual cash the business
- *    produces;
- *  - single-ratio rules of thumb (Graham Number, Lynch) are kept as context
- *    markers at low weight — they were designed as screens, not as valuations,
- *    and giving them equal weight was pulling the blend toward a floor.
- * Weights are renormalized over whichever models are available and pass the
- * outlier guard, so a missing model never silently reweights the rest.
+ * Weights within the `value` group. Cash-flow models dominate because they
+ * value the cash the business actually produces; the relative-valuation
+ * cross-check and third-party DCFs keep the estimate from being a single
+ * model's opinion.
  */
 export const MODEL_WEIGHTS = {
-  twoStage: 0.26,
-  tenYearFade: 0.13,
-  conservativeFcf: 0.1,
-  fiveYearFcf: 0.08,
-  external: 0.1, // shared across all third-party DCF values
-  evEbitda: 0.09,
-  residualIncome: 0.08,
-  earningsPower: 0.07,
-  grahamFormula: 0.05,
-  ddm: 0.05,
-  lynch: 0.02,
-  grahamNumber: 0.02,
+  twoStage: 0.34,
+  tenYearFade: 0.18,
+  fiveYearFcf: 0.12,
+  evEbitda: 0.16,
+  external: 0.14, // shared across all third-party DCF values
+  ddm: 0.06,
+  // --- floor group (excluded from the central fair value) ---
+  conservativeFcf: 0.35,
+  earningsPower: 0.3,
+  residualIncome: 0.25,
+  grahamNumber: 0.1,
+  // --- reference only (excluded from both) ---
+  grahamFormula: 0,
+  lynch: 0,
 } as const;
 
 /** Net cash may not contribute more than this share of the operating PV. */
@@ -262,6 +276,37 @@ export function fcfDCF10Year(
   return round2(result.pv / sharesOutstanding);
 }
 
+/**
+ * The EV/EBITDA multiple to value the business at.
+ *
+ * Preference order:
+ *  1. The median multiple the market has paid for THIS business over the past
+ *     decade. That is an observation, not an assumption, and it is what makes
+ *     the model an independent cross-check rather than a restatement of the DCF.
+ *  2. Failing that, a growth-scaled multiple. A flat multiple for every company
+ *     is not neutral — it is a large haircut on anything growing faster than
+ *     the average constituent of whatever set the flat number came from.
+ *
+ * Bounded either way, so one bad year or an extreme growth input cannot carry
+ * the valuation.
+ */
+export function fairEvEbitdaMultiple(opts: {
+  historicalMedian?: number;
+  growthRate?: number;
+  volatility?: number;
+}): number {
+  const { historicalMedian, growthRate, volatility } = opts;
+  if (historicalMedian != null && isFinite(historicalMedian) && historicalMedian > 0) {
+    // Trim the historical median slightly so a decade-long re-rating does not
+    // get extrapolated forever.
+    return Math.min(25, Math.max(5, historicalMedian * 0.9));
+  }
+  const g = Math.max(0, Math.min(growthRate ?? 0, 0.3));
+  let multiple = 8 + 40 * g; // 0% growth -> 8x, 15% -> 14x, 30% -> 20x
+  if (volatility != null && volatility > 0.5) multiple *= 0.85;
+  return Math.min(20, Math.max(6, multiple));
+}
+
 /** EV/EBITDA multiple fair value. */
 export function evEbitdaFairValue(
   ebitda: number,
@@ -290,6 +335,10 @@ export interface BuildDCFParams {
   /** Volatility-adjusted discount rate from normalizeInputs(). */
   discountRate?: number;
   terminalGrowth?: number;
+  /** Median EV/EBITDA the market has paid for this business historically. */
+  historicalEvEbitda?: number;
+  /** Business volatility (coefficient of variation), for the multiple haircut. */
+  volatility?: number;
 }
 
 export function buildDCFModels(params: BuildDCFParams): ComputedDCF[] {
@@ -298,7 +347,7 @@ export function buildDCFModels(params: BuildDCFParams): ComputedDCF[] {
   const terminalGrowth = params.terminalGrowth ?? 0.025;
   const growthRate = params.earningsGrowthRate;
   const growthPct = growthRate != null ? growthRate * 100 : undefined;
-  const rateNote = `折现率 ${(discountRate * 100).toFixed(2)}%（按历史现金流波动率调整）`;
+  const rateNote = `折现率 ${(discountRate * 100).toFixed(2)}%（按历史经营现金流波动率调整）`;
 
   const push = (m: ComputedDCF | null) => {
     if (m && m.value > 0) results.push(m);
@@ -307,7 +356,9 @@ export function buildDCFModels(params: BuildDCFParams): ComputedDCF[] {
   const hasFcf = params.freeCashflow != null && params.freeCashflow > 0;
   const hasShares = params.sharesOutstanding != null && params.sharesOutstanding > 0;
 
-  // 0. Primary — two-stage fading DCF on normalized FCF.
+  // ===================== value group =====================
+
+  // Primary — two-stage fading DCF on normalized FCF.
   if (hasFcf && hasShares && growthRate != null) {
     const out = twoStageDCF(params.freeCashflow!, growthRate, params.sharesOutstanding!, {
       discountRate,
@@ -325,12 +376,13 @@ export function buildDCFModels(params: BuildDCFParams): ComputedDCF[] {
         }`,
         value: out.value,
         annotation: "primary",
+        role: "value",
         weight: MODEL_WEIGHTS.twoStage,
       });
     }
   }
 
-  // 1. 10-year fade DCF — same shape, growth haircut 10%, no net-cash bridge.
+  // 10-year fade DCF — same shape, growth haircut 10%, no net-cash bridge.
   if (hasFcf && hasShares && growthRate != null) {
     const val = fcfDCF10Year(
       params.freeCashflow!,
@@ -346,12 +398,13 @@ export function buildDCFModels(params: BuildDCFParams): ComputedDCF[] {
         methodology: `10年现金流折现，增速打9折，后5年线性衰减至 ${(terminalGrowth * 100).toFixed(1)}% | ${rateNote}`,
         value: val,
         annotation: "authoritative",
+        role: "value",
         weight: MODEL_WEIGHTS.tenYearFade,
       });
     }
   }
 
-  // 2. 5-year FCF DCF.
+  // 5-year FCF DCF — shortest explicit horizon in the value group.
   if (hasFcf && hasShares && growthRate != null) {
     const val = fcfDCF(
       params.freeCashflow!,
@@ -367,12 +420,63 @@ export function buildDCFModels(params: BuildDCFParams): ComputedDCF[] {
         methodology: `5年现金流折现 + Gordon 终值 | ${rateNote}，终值增长 ${(terminalGrowth * 100).toFixed(1)}%`,
         value: val,
         annotation: "authoritative",
+        role: "value",
         weight: MODEL_WEIGHTS.fiveYearFcf,
       });
     }
   }
 
-  // 3. Conservative downside case.
+  // Relative valuation cross-check.
+  if (params.ebitda && hasShares) {
+    const multiple = fairEvEbitdaMultiple({
+      historicalMedian: params.historicalEvEbitda,
+      growthRate,
+      volatility: params.volatility,
+    });
+    const val = evEbitdaFairValue(
+      params.ebitda,
+      params.sharesOutstanding!,
+      params.netDebt ?? 0,
+      multiple
+    );
+    if (val) {
+      push({
+        source: "EV/EBITDA",
+        model: "EV/EBITDA 乘数估值",
+        methodology:
+          params.historicalEvEbitda != null
+            ? `归一化 EBITDA × ${multiple.toFixed(1)}×（该公司自身近十年 EV/EBITDA 中位数 ${params.historicalEvEbitda.toFixed(
+                1
+              )}× 打9折），扣减净负债`
+            : `归一化 EBITDA × ${multiple.toFixed(1)}×（按增长率推算，无历史乘数可用），扣减净负债`,
+        value: val,
+        annotation: "classic",
+        role: "value",
+        weight: MODEL_WEIGHTS.evEbitda,
+      });
+    }
+  }
+
+  // Dividend discount — a genuine value estimate where the dividend is the return.
+  if (params.dividendPerShare && params.dividendPerShare > 0.5 && growthRate != null) {
+    const val = ddmValue(params.dividendPerShare, growthRate, discountRate);
+    if (val) {
+      push({
+        source: "Dividend Model",
+        model: "股息折现模型 DDM",
+        methodology: `D₁/(r−g)，r = ${(discountRate * 100).toFixed(2)}% — 适用于稳定分红股票`,
+        value: val,
+        annotation: "supplemental",
+        role: "value",
+        weight: MODEL_WEIGHTS.ddm,
+      });
+    }
+  }
+
+  // ===================== floor group =====================
+  // These answer "what is it worth if growth stops", not "what is it worth".
+  // They set the margin-of-safety band; they never enter the fair value.
+
   if (hasFcf && hasShares && growthRate != null) {
     const val = conservativeFcfDCF(
       params.freeCashflow!,
@@ -386,117 +490,94 @@ export function buildDCFModels(params: BuildDCFParams): ComputedDCF[] {
         model: "保守 FCF DCF (下行情景)",
         methodology: `折现率 +200bp 至 ${(Math.min(discountRate + 0.02, 0.15) * 100).toFixed(
           2
-        )}%，增速打7折，终值增长 2% — 下行情景参考`,
+        )}%，增速打7折，终值增长 2% — 假设空间的悲观一角，计入安全边际下限`,
         value: val,
         annotation: "conservative",
+        role: "floor",
         weight: MODEL_WEIGHTS.conservativeFcf,
       });
     }
   }
 
-  // 4. EV/EBITDA multiple.
-  if (params.ebitda && hasShares) {
-    const val = evEbitdaFairValue(params.ebitda, params.sharesOutstanding!, params.netDebt ?? 0);
-    if (val) {
-      push({
-        source: "EV/EBITDA",
-        model: "EV/EBITDA 乘数估值",
-        methodology: "归一化 EBITDA × 12× 保守乘数，扣减净负债 — 相对估值法",
-        value: val,
-        annotation: "classic",
-        weight: MODEL_WEIGHTS.evEbitda,
-      });
-    }
-  }
-
-  // 5. Residual income.
-  if (params.eps && params.bvps && growthRate != null) {
-    const val = residualIncomeValue(params.bvps, params.eps, growthRate, discountRate);
-    if (val) {
-      push({
-        source: "Residual Income",
-        model: "剩余收益模型 RIM",
-        methodology: `每股净资产 + 超额收益(ROE−r)折现，超额收益按8年线性衰减 | 要求回报率 ${(
-          discountRate * 100
-        ).toFixed(2)}%`,
-        value: val,
-        annotation: "classic",
-        weight: MODEL_WEIGHTS.residualIncome,
-      });
-    }
-  }
-
-  // 6. Earnings power value — zero-growth floor on normalized EPS.
   if (params.eps && params.eps > 0) {
     const val = earningsPowerValue(params.eps, discountRate);
     if (val) {
       push({
         source: "Bruce Greenwald",
         model: "盈利能力价值 EPV",
-        methodology: `归一化 EPS / 资本成本 ${(discountRate * 100).toFixed(2)}% — 零增长假设下的价值`,
+        methodology: `归一化 EPS / 资本成本 ${(discountRate * 100).toFixed(
+          2
+        )}% — 零增长假设下的价值，是下限而非估值`,
         value: val,
         annotation: "conservative",
+        role: "floor",
         weight: MODEL_WEIGHTS.earningsPower,
       });
     }
   }
 
-  // 7. Graham intrinsic value formula.
-  if (params.eps && growthPct != null) {
-    const val = grahamFormula(params.eps, growthPct);
+  if (params.eps && params.bvps && growthRate != null) {
+    const val = residualIncomeValue(params.bvps, params.eps, growthRate, discountRate);
     if (val) {
       push({
-        source: "Benjamin Graham",
-        model: "格雷厄姆内在价值公式",
-        methodology: "EPS × (8.5 + 2g) × 4.4 / 债券收益率，g 为归一化增长率",
+        source: "Residual Income",
+        model: "剩余收益模型 RIM",
+        methodology: `每股净资产 + 超额收益(ROE−r)折现，8年线性衰减 — 以账面价值为锚，对轻资产公司系统性偏低，计入下限`,
         value: val,
-        annotation: "classic",
-        weight: MODEL_WEIGHTS.grahamFormula,
+        annotation: "conservative",
+        role: "floor",
+        weight: MODEL_WEIGHTS.residualIncome,
       });
     }
   }
 
-  // 8. Lynch PEG=1 — context marker only.
-  if (params.eps && growthPct != null && growthPct > 0) {
-    const val = lynchFairValue(params.eps, growthPct);
-    if (val) {
-      push({
-        source: "Peter Lynch",
-        model: "Lynch 公允价值 (PEG=1)",
-        methodology: "归一化 EPS × 增长率% — 参考标尺，权重 2%",
-        value: val,
-        annotation: "optimistic",
-        weight: MODEL_WEIGHTS.lynch,
-      });
-    }
-  }
-
-  // 9. Graham Number — floor marker only.
   if (params.eps && params.bvps) {
     const val = grahamNumber(params.eps, params.bvps);
     if (val) {
       push({
         source: "Benjamin Graham",
         model: "格雷厄姆数字 Graham Number",
-        methodology: "√(22.5 × EPS × 每股净资产) — 1930年代防御型选股筛选线，仅作下限标记，权重 2%",
+        methodology: "√(22.5 × EPS × 每股净资产) — 1930年代防御型选股筛选线，最严格的下限",
         value: val,
         annotation: "pessimistic",
+        role: "floor",
         weight: MODEL_WEIGHTS.grahamNumber,
       });
     }
   }
 
-  // 10. DDM — only where the dividend is a meaningful part of the return.
-  if (params.dividendPerShare && params.dividendPerShare > 0.5 && growthRate != null) {
-    const val = ddmValue(params.dividendPerShare, growthRate, discountRate);
+  // ===================== reference only =====================
+  // Displayed for context. Excluded from both the fair value and the floor
+  // band because neither is a bounded estimate: Graham's formula multiplies
+  // EPS by (8.5 + 2g), so at 20% growth it pays 48x earnings, and Lynch's
+  // PEG=1 rule was written as a screen, not a valuation.
+
+  if (params.eps && growthPct != null) {
+    const val = grahamFormula(params.eps, growthPct);
     if (val) {
       push({
-        source: "Dividend Model",
-        model: "股息折现模型 DDM",
-        methodology: `D₁/(r−g)，r = ${(discountRate * 100).toFixed(2)}% — 适用于稳定分红股票`,
+        source: "Benjamin Graham",
+        model: "格雷厄姆内在价值公式",
+        methodology: "EPS × (8.5 + 2g) × 4.4 / 债券收益率 — 高增长下会给出 40 倍以上市盈率，仅作参考，不计入加权",
         value: val,
-        annotation: "supplemental",
-        weight: MODEL_WEIGHTS.ddm,
+        annotation: "classic",
+        role: "reference",
+        weight: MODEL_WEIGHTS.grahamFormula,
+      });
+    }
+  }
+
+  if (params.eps && growthPct != null && growthPct > 0) {
+    const val = lynchFairValue(params.eps, growthPct);
+    if (val) {
+      push({
+        source: "Peter Lynch",
+        model: "Lynch 公允价值 (PEG=1)",
+        methodology: "归一化 EPS × 增长率% — 快速筛选标尺，仅作参考，不计入加权",
+        value: val,
+        annotation: "optimistic",
+        role: "reference",
+        weight: MODEL_WEIGHTS.lynch,
       });
     }
   }

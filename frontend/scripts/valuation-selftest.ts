@@ -10,7 +10,7 @@
  */
 import { normalizeInputs } from "../src/lib/data/normalize";
 import { buildDCFModels } from "../src/lib/data/dcf-models";
-import { markReliability, weightedFairValue } from "../src/lib/data/aggregator";
+import { blendFairValue } from "../src/lib/data/aggregator";
 import type { AnnualFinancials, FinancialHistory } from "../src/lib/data/history";
 import type { SourceValue } from "../src/types/stock";
 
@@ -144,6 +144,24 @@ const SCENARIOS: Scenario[] = [
     price: 200,
   },
   {
+    name: "F 优质复利成长股 (quality compounder)",
+    expectation:
+      "加权结果应贴近核心 DCF 锚（0.85–1.15×），不得被下限类模型系统性拖低；下限应明显低于公允价值",
+    years: [
+      { year: 2019, revenue: 125, ocfMargin: 0.38, capexIntensity: 0.07, netMargin: 0.28 },
+      { year: 2020, revenue: 143, ocfMargin: 0.39, capexIntensity: 0.08, netMargin: 0.29 },
+      { year: 2021, revenue: 168, ocfMargin: 0.4, capexIntensity: 0.09, netMargin: 0.31 },
+      { year: 2022, revenue: 198, ocfMargin: 0.39, capexIntensity: 0.11, netMargin: 0.3 },
+      { year: 2023, revenue: 228, ocfMargin: 0.4, capexIntensity: 0.13, netMargin: 0.3 },
+      { year: 2024, revenue: 262, ocfMargin: 0.4, capexIntensity: 0.16, netMargin: 0.31 },
+    ],
+    ttm: { revenue: 300, ocfMargin: 0.4, capexIntensity: 0.19, netMargin: 0.31 },
+    earningsGrowthTTM: 0.14,
+    revenueGrowthTTM: 0.15,
+    analystLongTermGrowth: 0.16,
+    price: 495,
+  },
+  {
     name: "E 强周期股 (volatile cyclical)",
     expectation: "高波动 → 折现率上浮；confidence 不应为 high",
     years: [
@@ -216,12 +234,13 @@ function runPipeline(sc: Scenario, useHistory: boolean) {
     value: m.value,
     model: m.model,
     annotation: m.annotation,
+    role: m.role,
     weight: m.weight,
   }));
-  const flags = markReliability(sources.map((s) => s.value), sc.price);
-  sources.forEach((s, i) => (s.reliable = flags[i]));
+  const { fairValue, floorValue } = blendFairValue(sources, sc.price);
+  const anchor = sources.find((s) => s.annotation === "primary")?.value;
 
-  return { norm, sources, fair: weightedFairValue(sources), fcfTTM, epsTTM };
+  return { norm, sources, fair: fairValue, floor: floorValue, anchor, fcfTTM, epsTTM };
 }
 
 const pct = (v?: number) => (v == null ? "n/a" : `${(v * 100).toFixed(1)}%`);
@@ -262,13 +281,28 @@ for (const sc of SCENARIOS) {
         withHist.fair ? (((sc.price - withHist.fair) / withHist.fair) * 100).toFixed(1) : "n/a"
       }%)`
   );
-  const reliable = withHist.sources.filter((s) => s.reliable !== false);
-  console.log(`   模型数 ${withHist.sources.length}，通过离群检验 ${reliable.length}`);
+  console.log(
+    `   安全边际下限 $${withHist.floor?.toFixed(2)}   加权/核心DCF锚 = ${
+      withHist.anchor ? ((withHist.fair ?? 0) / withHist.anchor).toFixed(3) : "n/a"
+    }`
+  );
+  const valueW = withHist.sources.reduce(
+    (sum, s) => (s.role === "value" && s.reliable !== false ? sum + (s.weight ?? 0) : sum),
+    0
+  );
   for (const s of withHist.sources) {
+    const eff =
+      s.role === "value" && s.reliable !== false && valueW > 0
+        ? `${(((s.weight ?? 0) / valueW) * 100).toFixed(0)}%`
+        : s.role === "floor"
+        ? "下限"
+        : s.role === "reference"
+        ? "参考"
+        : "0%";
     console.log(
       `      ${s.reliable === false ? "x" : " "} ${(s.model || "").padEnd(28)} $${s.value
         .toFixed(2)
-        .padStart(9)}  w=${((s.weight ?? 0) * 100).toFixed(0)}%`
+        .padStart(9)}  ${eff}`
     );
   }
   for (const a of withHist.norm.diagnostics.adjustments) console.log(`      · ${a}`);
@@ -310,12 +344,35 @@ for (const sc of SCENARIOS) {
       (withHist.norm.growthRate ?? 1) < 0,
       `${pct(withHist.norm.growthRate)}`
     );
+    check(
+      "角色拆分未把衰退股抬到现价之上",
+      (withHist.fair ?? 0) < sc.price,
+      `$${withHist.fair?.toFixed(2)} vs 现价 $${sc.price}`
+    );
   }
   if (sc.name.startsWith("D")) {
     check(
       "低波动 → 折现率 ≤ 9.5%",
       withHist.norm.discountRate <= 0.095,
       pct(withHist.norm.discountRate)
+    );
+  }
+  if (sc.name.startsWith("F")) {
+    const ratio = withHist.anchor ? (withHist.fair ?? 0) / withHist.anchor : 0;
+    check(
+      "加权结果贴近核心 DCF 锚（0.85–1.15×）",
+      ratio >= 0.85 && ratio <= 1.15,
+      `ratio=${ratio.toFixed(3)}`
+    );
+    check(
+      "安全边际下限明显低于公允价值",
+      (withHist.floor ?? Infinity) < (withHist.fair ?? 0) * 0.9,
+      `下限 $${withHist.floor?.toFixed(2)} vs 公允 $${withHist.fair?.toFixed(2)}`
+    );
+    check(
+      "前瞻增速未被历史 CAGR 淹没",
+      (withHist.norm.growthRate ?? 0) >= 0.13,
+      pct(withHist.norm.growthRate)
     );
   }
   if (sc.name.startsWith("E")) {

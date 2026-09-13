@@ -1,5 +1,11 @@
 export type DCFAnnotation = "primary" | "authoritative" | "optimistic" | "pessimistic" | "classic" | "supplemental" | "external" | "conservative";
 
+/**
+ * What quantity a model estimates. Only `value` models set the fair value;
+ * `floor` models set the margin-of-safety band; `reference` models are context.
+ */
+export type DCFRole = "value" | "floor" | "reference";
+
 export interface SourceValue {
   source: string;
   value: number;
@@ -7,7 +13,8 @@ export interface SourceValue {
   methodology?: string;
   annotation?: DCFAnnotation;
   reliable?: boolean; // false = flagged as an outlier; excluded from the blend
-  /** Base weight in the blended fair value, before renormalization. */
+  role?: DCFRole;
+  /** Base weight within its role group, before renormalization. */
   weight?: number;
 }
 
@@ -56,6 +63,8 @@ export interface ValuationQuality {
   dispersion?: number;
   fair_value_low?: number;
   fair_value_high?: number;
+  /** Median of the floor models — margin-of-safety reference, not the estimate. */
+  floor_value?: number;
   normalized_fcf?: number;
   ttm_fcf?: number;
   owner_earnings?: number;
@@ -67,10 +76,15 @@ export interface ValuationQuality {
   terminal_growth_used?: number;
   fcf_volatility?: number;
   earnings_volatility?: number;
+  ocf_volatility?: number;
+  /** The volatility actually used to set the discount rate. */
+  business_volatility?: number;
+  /** Median EV/EBITDA from the company's own history. */
+  ev_ebitda_median?: number;
   capex_spike?: boolean;
   capex_intensity_ttm?: number;
   capex_intensity_median?: number;
-  growth_sources?: { label: string; value: number }[];
+  growth_sources?: { label: string; value: number; forward?: boolean }[];
   adjustments?: string[];
 }
 
