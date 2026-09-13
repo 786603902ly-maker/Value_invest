@@ -1,6 +1,6 @@
 "use client";
 
-import { StockValuation, DCFAnnotation, ValuationQuality } from "@/types/stock";
+import { StockValuation, DCFAnnotation, DCFRole, ValuationQuality } from "@/types/stock";
 import { useI18n } from "@/lib/i18n";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -88,6 +88,24 @@ const ANNOTATION_CONFIG: Record<
   },
 };
 
+
+const ROLE_CONFIG: Record<DCFRole, { label: string; labelEn: string; color: string }> = {
+  value: {
+    label: "计入估值",
+    labelEn: "In fair value",
+    color: "bg-indigo-100 text-indigo-800 border-indigo-300 dark:bg-indigo-900/30 dark:text-indigo-300",
+  },
+  floor: {
+    label: "安全边际下限",
+    labelEn: "Floor",
+    color: "bg-orange-100 text-orange-800 border-orange-300 dark:bg-orange-900/30 dark:text-orange-300",
+  },
+  reference: {
+    label: "仅参考",
+    labelEn: "Reference",
+    color: "bg-gray-100 text-gray-700 border-gray-300 dark:bg-gray-800 dark:text-gray-300",
+  },
+};
 
 const CONFIDENCE_CONFIG = {
   high: {
@@ -258,13 +276,14 @@ export default function DCFDetailTable({ stock }: Props) {
   }
 
   const avg = stock.dcf_fair_value.avg;
-  const min = stock.dcf_fair_value.min;
-  const max = stock.dcf_fair_value.max;
   const quality = stock.valuation_quality;
-  // Weights are renormalized over the models that passed the outlier guard, so
-  // the column adds up to 100% of what actually drove the number.
+  // Weights are renormalized over the VALUE models that passed the outlier
+  // guard, so the column adds up to 100% of what actually drove the number.
   const totalReliableWeight =
-    sources.reduce((sum, s) => (s.reliable === false ? sum : sum + (s.weight ?? 0)), 0) || 1;
+    sources.reduce(
+      (sum, s) => ((s.role ?? "value") === "value" && s.reliable !== false ? sum + (s.weight ?? 0) : sum),
+      0
+    ) || 1;
   return (
     <div className="space-y-4">
       {/* Summary row */}
@@ -306,10 +325,13 @@ export default function DCFDetailTable({ stock }: Props) {
         </div>
         <div className="text-center">
           <div className="text-xs text-muted-foreground mb-1">
-            {locale === "zh" ? "全模型区间" : "Full model range"}
+            {locale === "zh" ? "安全边际下限" : "Margin-of-safety floor"}
           </div>
-          <div className="text-lg font-bold">
-            {fmt(min, stock.currency)} – {fmt(max, stock.currency)}
+          <div className="text-lg font-bold text-orange-600">
+            {fmt(quality?.floor_value, stock.currency)}
+          </div>
+          <div className="text-xs text-muted-foreground mt-1">
+            {locale === "zh" ? "零增长/账面类模型中位数" : "median of no-growth models"}
           </div>
         </div>
       </div>
@@ -333,6 +355,9 @@ export default function DCFDetailTable({ stock }: Props) {
               <th className="text-right py-2 pr-4 font-medium">
                 {locale === "zh" ? "与现价偏离" : "vs Current"}
               </th>
+              <th className="text-center py-2 pr-4 font-medium">
+                {locale === "zh" ? "作用" : "Role"}
+              </th>
               <th className="text-right py-2 pr-4 font-medium">
                 {locale === "zh" ? "权重" : "Weight"}
               </th>
@@ -343,6 +368,7 @@ export default function DCFDetailTable({ stock }: Props) {
           </thead>
           <tbody>
             {sources.map((s, i) => {
+              const role: DCFRole = s.role ?? "value";
               const annotation = s.annotation ?? "supplemental";
               const cfg = ANNOTATION_CONFIG[annotation];
               const isPrimary = annotation === "primary";
@@ -405,11 +431,16 @@ export default function DCFDetailTable({ stock }: Props) {
                       "—"
                     )}
                   </td>
+                  <td className="py-3 pr-4 text-center">
+                    <Badge variant="outline" className={`text-xs ${ROLE_CONFIG[role].color}`}>
+                      {locale === "zh" ? ROLE_CONFIG[role].label : ROLE_CONFIG[role].labelEn}
+                    </Badge>
+                  </td>
                   <td className="py-3 pr-4 text-right font-mono text-xs text-muted-foreground">
-                    {s.weight != null
+                    {role === "value"
                       ? s.reliable === false
                         ? "0%"
-                        : `${((s.weight / totalReliableWeight) * 100).toFixed(0)}%`
+                        : `${(((s.weight ?? 0) / totalReliableWeight) * 100).toFixed(0)}%`
                       : "—"}
                   </td>
                   <td className="py-3 text-center">
@@ -441,8 +472,8 @@ export default function DCFDetailTable({ stock }: Props) {
       <div className="pt-2 border-t space-y-2">
         <p className="text-xs text-muted-foreground">
           {locale === "zh"
-            ? `💡 加权均值按模型权重计算，权重反映每个模型对"持续经营企业价值"的证据强度：现金流折现类占主导，单一比率类（格雷厄姆数字、Lynch）仅作参考标尺。所有输入均已按多年历史归一化，不以单一季度定十年假设。`
-            : `💡 The weighted average uses per-model weights reflecting how much evidence each model carries about a going concern: cash-flow models dominate, single-ratio rules of thumb (Graham Number, Lynch) are context markers only. All inputs are normalized across multiple years rather than taken from one quarter.`}
+            ? `💡 只有「计入估值」的模型参与加权——它们估的是同一个量：持续经营企业的内在价值。「安全边际下限」类模型（EPV零增长、剩余收益、格雷厄姆数字、保守下行）估的是另一个量：增长停止时值多少，因此单列为下限而不混入均值——把估值和下限平均，得到的既不是估值也不是下限。「仅参考」类（格雷厄姆公式、Lynch）不是有界估计，只作标尺。`
+            : `💡 Only "In fair value" models are averaged — they estimate the same quantity: the intrinsic value of a going concern. "Floor" models (zero-growth EPV, residual income, Graham Number, the downside DCF) estimate a different one: what it is worth if growth stops, so they set the margin-of-safety band instead of being averaged in — blending a valuation with a floor gives neither. "Reference" models are unbounded rules of thumb, shown as context only.`}
         </p>
         <p className="text-xs text-amber-600 dark:text-amber-400">
           {locale === "zh"

@@ -119,6 +119,51 @@ export function weightedFairValue(sources: SourceValue[]): number | undefined {
   return Math.round(weighted * 100) / 100;
 }
 
+/**
+ * Turn the model set into a single fair value plus a margin-of-safety floor.
+ *
+ * Flags reliability in place on `sources`, so the UI can show which models were
+ * excluded and at what effective weight.
+ */
+export function blendFairValue(
+  sources: SourceValue[],
+  priceAnchor?: number
+): { fairValue?: number; floorValue?: number; reliableValues: number[] } {
+  // The outlier test runs WITHIN the value family, never across all models.
+  // A median-absolute-deviation test assumes its inputs estimate the same
+  // quantity; run over a mixed population it does not find bad data, it finds
+  // whichever group is largest and discards the rest. With the floors in the
+  // same pool, the cash-flow models were the ones getting flagged.
+  const valueSources = sources.filter((s) => s.role === "value");
+  const floorSources = sources.filter((s) => s.role === "floor");
+
+  const valueFlags = markReliability(
+    valueSources.map((s) => s.value),
+    priceAnchor
+  );
+  valueSources.forEach((s, i) => {
+    s.reliable = valueFlags[i];
+  });
+
+  // Floors get a sanity check but never a dispersion filter: a floor is
+  // SUPPOSED to sit well below the value estimates, so flagging it for
+  // disagreeing with them would defeat its purpose.
+  const inSanityBand = (v: number) =>
+    priceAnchor == null || priceAnchor <= 0 ? true : v >= priceAnchor * 0.05 && v <= priceAnchor * 5;
+  for (const s of floorSources) s.reliable = inSanityBand(s.value);
+  for (const s of sources) if (s.role === "reference") s.reliable = true;
+
+  const reliableValues = valueSources.filter((s) => s.reliable !== false).map((s) => s.value);
+  const fairValue = weightedFairValue(valueSources) ?? safeAvg(reliableValues);
+
+  const floorValues = floorSources.filter((s) => s.reliable !== false).map((s) => s.value);
+  const floorValue = floorValues.length
+    ? Math.round(percentile([...floorValues].sort((a, b) => a - b), 0.5)! * 100) / 100
+    : undefined;
+
+  return { fairValue, floorValue, reliableValues };
+}
+
 function pegSignal(peg?: number): string | undefined {
   if (peg == null) return undefined;
   if (peg < 1) return "undervalued";
@@ -158,8 +203,8 @@ export async function getFullValuation(symbol: string): Promise<StockValuation> 
   const dividendPerShare = avOverview?.dividendPerShare ?? yahooData.dividendPerShare;
   const ebitdaTTM = fmpIncome?.ebitda ?? avOverview?.ebitda ?? yahooData.ebitda;
   const netDebtRaw =
-    fmpEV?.enterpriseValue != null && fmpEV?.marketCap != null
-      ? fmpEV.enterpriseValue - fmpEV.marketCap
+    fmpEV?.latest?.enterpriseValue != null && fmpEV?.latest?.marketCap != null
+      ? fmpEV.latest.enterpriseValue - fmpEV.latest.marketCap
       : undefined;
 
   // --- Through-cycle normalization ---------------------------------------
@@ -180,6 +225,7 @@ export async function getFullValuation(symbol: string): Promise<StockValuation> 
     earningsGrowthTTM: yahooData.earningsGrowthRate,
     revenueGrowthTTM: yahooData.revenueGrowthRate,
     analystLongTermGrowth: yahooData.analystLongTermGrowth,
+    enterpriseValues: fmpEV?.series,
   });
 
   // --- Currency & ADR adjustment for total-company figures ----------------
@@ -223,6 +269,8 @@ export async function getFullValuation(symbol: string): Promise<StockValuation> 
     netDebt: adjustedNetDebt,
     discountRate: normalized.discountRate,
     terminalGrowth: normalized.terminalGrowth,
+    historicalEvEbitda: normalized.historicalEvEbitda,
+    volatility: normalized.volatility,
   });
 
   // --- Assemble the source list ------------------------------------------
@@ -232,6 +280,7 @@ export async function getFullValuation(symbol: string): Promise<StockValuation> 
     model: m.model,
     methodology: m.methodology,
     annotation: m.annotation,
+    role: m.role,
     weight: m.weight,
   }));
 
@@ -243,23 +292,15 @@ export async function getFullValuation(symbol: string): Promise<StockValuation> 
       source: "FMP",
       value: Math.round(d.value * 100) / 100,
       model: d.model,
-      methodology: "第三方 DCF 估值（独立视角，与内部模型共享 10% 权重）",
+      methodology: "第三方 DCF 估值（独立视角，全部第三方来源共享一档权重）",
       annotation: "external",
+      role: "value",
       weight: MODEL_WEIGHTS.external / externalCount,
     });
   }
 
   const priceAnchor = yahooData.currentPrice ?? yahooData.targetMean ?? undefined;
-  const flags = markReliability(
-    dcfSources.map((s) => s.value),
-    priceAnchor
-  );
-  dcfSources.forEach((s, i) => {
-    s.reliable = flags[i];
-  });
-
-  const reliableValues = dcfSources.filter((s) => s.reliable !== false).map((s) => s.value);
-  const dcfAvg = weightedFairValue(dcfSources) ?? safeAvg(reliableValues);
+  const { fairValue: dcfAvg, floorValue, reliableValues } = blendFairValue(dcfSources, priceAnchor);
 
   // --- Target Price sources ----------------------------------------------
   const targetSources: TargetPriceSource[] = [];
@@ -335,6 +376,7 @@ export async function getFullValuation(symbol: string): Promise<StockValuation> 
     dispersion: dispersion != null ? Math.round(dispersion * 100) / 100 : undefined,
     fair_value_low: p25 != null ? Math.round(p25 * 100) / 100 : undefined,
     fair_value_high: p75 != null ? Math.round(p75 * 100) / 100 : undefined,
+    floor_value: floorValue,
     normalized_fcf: normalized.freeCashflow,
     ttm_fcf: normalized.freeCashflowTTM,
     owner_earnings: normalized.ownerEarnings,
@@ -346,6 +388,9 @@ export async function getFullValuation(symbol: string): Promise<StockValuation> 
     terminal_growth_used: normalized.terminalGrowth,
     fcf_volatility: normalized.diagnostics.fcfVolatility,
     earnings_volatility: normalized.diagnostics.earningsVolatility,
+    ocf_volatility: normalized.diagnostics.ocfVolatility,
+    business_volatility: normalized.diagnostics.businessVolatility,
+    ev_ebitda_median: normalized.diagnostics.evEbitdaMedian,
     capex_spike: normalized.diagnostics.capexSpike,
     capex_intensity_ttm: normalized.diagnostics.capexIntensityTTM,
     capex_intensity_median: normalized.diagnostics.capexIntensityMedian,
