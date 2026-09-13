@@ -48,6 +48,32 @@ export interface FinancialHistory {
   provider: "yahoo" | "fmp" | "none";
 }
 
+/**
+ * The valuation route fetches every watchlist symbol in ONE serverless
+ * invocation capped at 30s (frontend/vercel.json). History adds upstream calls
+ * per symbol, so it must never be the thing that blows that budget: a slow
+ * provider degrades to "no history", which makes normalizeInputs fall back to
+ * the TTM snapshot and lowers the reported confidence, rather than failing the
+ * whole batch and leaving the page with nothing.
+ */
+const HISTORY_TIMEOUT_MS = 8000;
+
+/** Annual statements change once a quarter, so caching them for 12h is safe. */
+const HISTORY_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
+const historyCache = new Map<string, { data: FinancialHistory; ts: number }>();
+
+async function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<T>((resolve) => {
+    timer = setTimeout(() => resolve(fallback), ms);
+  });
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 const num = (v: unknown): number | undefined =>
   typeof v === "number" && isFinite(v) ? v : undefined;
 
@@ -216,23 +242,32 @@ export async function getFinancialHistory(
   symbol: string,
   years = 10
 ): Promise<FinancialHistory> {
-  let yahoo: FinancialHistory = { annual: [], provider: "none" };
+  const key = `${symbol.toUpperCase()}:${years}`;
+  const cached = historyCache.get(key);
+  if (cached && Date.now() - cached.ts < HISTORY_CACHE_TTL_MS) return cached.data;
+
+  const empty: FinancialHistory = { annual: [], provider: "none" };
+  let yahoo = empty;
   try {
-    yahoo = await getYahooHistory(symbol, years);
+    yahoo = await withTimeout(getYahooHistory(symbol, years), HISTORY_TIMEOUT_MS, empty);
   } catch (error) {
     console.error(`[History] Yahoo fundamentals failed for ${symbol}:`, error);
   }
 
   // 4+ years is enough to compute a robust median; below that, try FMP for more depth.
-  if (yahoo.annual.length >= 4) return yahoo;
-
-  try {
-    const fmp = await getFmpHistory(symbol, years);
-    if (fmp.annual.length > yahoo.annual.length) {
-      return { ...fmp, trailing: yahoo.trailing };
+  let result = yahoo;
+  if (yahoo.annual.length < 4) {
+    try {
+      const fmp = await withTimeout(getFmpHistory(symbol, years), HISTORY_TIMEOUT_MS, empty);
+      if (fmp.annual.length > yahoo.annual.length) {
+        result = { ...fmp, trailing: yahoo.trailing };
+      }
+    } catch (error) {
+      console.error(`[History] FMP statements failed for ${symbol}:`, error);
     }
-  } catch (error) {
-    console.error(`[History] FMP statements failed for ${symbol}:`, error);
   }
-  return yahoo;
+
+  // Only cache a real answer; an empty result should be retried on the next request.
+  if (result.annual.length > 0) historyCache.set(key, { data: result, ts: Date.now() });
+  return result;
 }
