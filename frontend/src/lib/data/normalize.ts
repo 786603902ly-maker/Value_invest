@@ -88,6 +88,11 @@ export interface NormalizeParams {
   analystLongTermGrowth?: number;
   /** Annual enterprise values, oldest first, for the historical EV/EBITDA median. */
   enterpriseValues?: { year: number; enterpriseValue?: number }[];
+  /** 10-year government bond yield, decimal: CAPM risk-free rate and the
+   *  ceiling on perpetual growth. */
+  riskFreeRate?: number;
+  /** Growth the market is pricing in: forward P/E divided by PEG. */
+  pegImpliedGrowth?: number;
 }
 
 // ---------------------------------------------------------------- statistics
@@ -189,9 +194,19 @@ const FCF_CAP_MULT = 2.5;
 /** Same guard rails for normalized EPS. */
 const EPS_FLOOR_MULT = 0.7;
 const EPS_CAP_MULT = 2.0;
+/**
+ * Equity risk premium for the CAPM cost of equity. Damodaran's implied US ERP
+ * has run in the 4-5% range; the published retail models source theirs there.
+ */
+const EQUITY_RISK_PREMIUM = 0.045;
+/** Working cap on perpetual growth, below the risk-free-rate ceiling. */
+const TERMINAL_GROWTH_CAP = 0.03;
+/** Beta bounds, matching the convention the published models use. */
+const BETA_MIN = 0.8;
+const BETA_MAX = 2.0;
 /** Stage-1 growth bounds after normalization. */
 const GROWTH_FLOOR = -0.05;
-const GROWTH_CAP = 0.30;
+const GROWTH_CAP = 0.25;
 
 export function normalizeInputs(params: NormalizeParams): NormalizedInputs {
   const { history } = params;
@@ -441,6 +456,24 @@ export function normalizeInputs(params: NormalizeParams): NormalizedInputs {
       forward: true,
     });
   }
+  // Growth implied by PEG: PEG = forward P/E / growth%, so forward P/E / PEG
+  // recovers the growth rate the PEG figure already encodes.
+  //
+  // This is what keeps the PEG column and the fair value column pointing the
+  // same way. They are two views of the same company, and when the DCF forecasts
+  // growth the PEG column never saw, the two can disagree in DIRECTION — the
+  // page saying "PEG 0.36, cheap" and "fair value 30% below price" at once,
+  // which is not a nuanced view, it is an internal contradiction. Feeding the
+  // implied growth in as one forward vote removes the contradiction at its
+  // source, while leaving the legitimate reasons the two still differ (capital
+  // intensity, leverage, risk) intact — a DCF pays for capex, PEG does not.
+  if (isNum(params.pegImpliedGrowth)) {
+    growthSources.push({
+      label: "PEG 隐含增速（前瞻PE÷PEG）",
+      value: params.pegImpliedGrowth,
+      forward: true,
+    });
+  }
   if (isNum(params.earningsGrowthTTM)) {
     growthSources.push({ label: "最近一期盈利同比", value: params.earningsGrowthTTM, forward: false });
   }
@@ -551,25 +584,65 @@ export function normalizeInputs(params: NormalizeParams): NormalizedInputs {
   // measures how stably the business converts revenue to cash, with the
   // investment decision stripped out.
   const businessVolatility = Math.max(ocfVolatility ?? 0, earningsVolatility ?? 0);
-  let discountRate = 0.09 + clamp(businessVolatility, 0, 1) * 0.04;
-  if (isNum(params.beta)) discountRate += clamp((params.beta - 1) * 0.02, -0.01, 0.02);
+
+  // Cost of equity from CAPM, not a hand-set base rate:
+  //     cost of equity = risk-free rate + beta x equity risk premium
+  // A fixed 9% ignores both the level of interest rates and the individual
+  // company's risk. CAPM with a bounded beta is what the published models use.
+  const riskFree = clamp(params.riskFreeRate ?? 0.04, 0.02, 0.07);
+  const beta = isNum(params.beta) ? clamp(params.beta, BETA_MIN, BETA_MAX) : 1.0;
+  let discountRate = riskFree + beta * EQUITY_RISK_PREMIUM;
+  // Beta is a market-price measure and can miss fundamental fragility, so a
+  // capped modifier sits on top — it adjusts CAPM rather than replacing it.
+  // Asymmetric: the modifier can add meaningfully for a fragile business but
+  // barely subtracts, so CAPM stays the floor rather than something to erode.
+  discountRate += clamp((businessVolatility - 0.25) * 0.04, -0.005, 0.015);
   if (yearsOfData < 4) discountRate += 0.005;
-  // A long, stable record is evidence in itself: it earns a lower required return.
-  if (yearsOfData >= 7 && businessVolatility < 0.15) discountRate -= 0.005;
-  discountRate = Math.round(clamp(discountRate, 0.08, 0.13) * 10000) / 10000;
+  // A cost of equity below 8% is hard to defend for a public equity, and the
+  // floor also guards against a bad beta or risk-free reading feeding through.
+  discountRate = Math.round(clamp(discountRate, 0.08, 0.14) * 10000) / 10000;
   adjustments.push(
-    `折现率 ${(discountRate * 100).toFixed(2)}%：基准 9% + 经营波动率调整（经营现金流/净利率波动系数 ${
+    `折现率 ${(discountRate * 100).toFixed(2)}% = CAPM 股权成本：无风险利率 ${(riskFree * 100).toFixed(
+      2
+    )}%（10年期国债）+ Beta ${beta.toFixed(2)}${
+      isNum(params.beta) ? "" : "（数据缺失，取 1.0）"
+    } × 股权风险溢价 ${(EQUITY_RISK_PREMIUM * 100).toFixed(1)}%，再按经营波动系数 ${
       businessVolatility ? businessVolatility.toFixed(2) : "n/a"
-    }${
-      fcfVolatility != null ? `；FCF 波动系数 ${fcfVolatility.toFixed(2)} 不计入，因其主要由资本开支节奏而非经营风险驱动` : ""
-    }）${isNum(params.beta) ? ` + Beta ${params.beta.toFixed(2)} 调整` : ""}`
+    } 微调（上限 ±100~150bp）${
+      fcfVolatility != null
+        ? `。FCF 波动系数 ${fcfVolatility.toFixed(2)} 不计入定价，因其主要由资本开支节奏而非经营风险驱动`
+        : ""
+    }`
   );
 
   // Terminal growth: below long-run GDP, and trimmed further when the business
   // has shown it cannot hold a stable margin.
-  let terminalGrowth = 0.025;
-  if (businessVolatility > 0.6) terminalGrowth = 0.02;
-  if (growthRate != null && growthRate <= 0) terminalGrowth = 0.015;
+  // Perpetual growth is anchored to the risk-free rate, not fixed at 2.5%.
+  //
+  // A company growing faster than the economy forever eventually becomes the
+  // economy, so the long-run nominal growth rate is the ceiling, and the
+  // risk-free rate is the standard proxy for it. That cuts both ways: when the
+  // 10-year sits near 4%, a hard-coded 2.5% is not a neutral choice but a
+  // permanent haircut on every terminal value — and the terminal value is the
+  // majority of a DCF. When rates are low, the same rule tightens it.
+  // The risk-free rate is the ceiling, and 3% is the working cap on top of it:
+  // sustaining full nominal GDP growth in perpetuity would mean never losing a
+  // point of share to a new entrant, forever. 2.5% was too low when the 10-year
+  // sits near 4%; the full risk-free rate is the aggressive end of the range.
+  let terminalGrowth = Math.min(riskFree, TERMINAL_GROWTH_CAP);
+  if (businessVolatility > 0.6) terminalGrowth = Math.min(terminalGrowth, 0.025);
+  if (growthRate != null && growthRate <= 0) terminalGrowth = Math.min(terminalGrowth, 0.015);
+  // Gordon's denominator has to stay wide enough that the terminal value is a
+  // valuation rather than a division-by-almost-zero.
+  terminalGrowth = Math.max(0.005, Math.min(terminalGrowth, discountRate - 0.04));
+  terminalGrowth = Math.round(terminalGrowth * 10000) / 10000;
+  adjustments.push(
+    `永续增长率 ${(terminalGrowth * 100).toFixed(2)}%，取无风险利率 ${(riskFree * 100).toFixed(
+      2
+    )}%（长期名义增长代理）与 ${(TERMINAL_GROWTH_CAP * 100).toFixed(
+      1
+    )}% 工作上限的较低者，并保证与折现率至少相差 400bp`
+  );
 
   // Book value per share, normalized off the latest reported equity when the
   // quote snapshot is missing it.

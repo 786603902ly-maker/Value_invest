@@ -197,6 +197,17 @@ function QualityPanel({ q, locale }: { q: ValuationQuality; locale: string }) {
         </span>
       </div>
 
+      {q.peg_conflict && (
+        <div className="rounded-md border border-amber-300 bg-amber-50 dark:bg-amber-900/20 dark:border-amber-700 p-3">
+          <div className="text-xs font-semibold text-amber-800 dark:text-amber-300 mb-1">
+            {zh ? "⚠ PEG 与 DCF 方向不一致" : "⚠ PEG and DCF disagree on direction"}
+          </div>
+          <div className="text-xs text-amber-900 dark:text-amber-200 leading-relaxed">
+            {q.peg_conflict}
+          </div>
+        </div>
+      )}
+
       {rows.length > 0 && (
         <table className="w-full text-xs">
           <thead>
@@ -219,14 +230,42 @@ function QualityPanel({ q, locale }: { q: ValuationQuality; locale: string }) {
               </tr>
             ))}
             <tr className="border-t">
-              <td className="py-1">{zh ? "折现率 / 终值增长" : "Discount / terminal growth"}</td>
+              <td className="py-1">{zh ? "折现率 (CAPM)" : "Discount rate (CAPM)"}</td>
               <td className="py-1 text-right font-mono text-muted-foreground">
-                {zh ? "固定 10% / 2.5%" : "was fixed 10% / 2.5%"}
+                {zh ? "旧：固定 10%" : "was fixed 10%"}
               </td>
               <td className="py-1 text-right font-mono font-medium">
-                {rate(q.discount_rate_used)} / {rate(q.terminal_growth_used)}
+                {rate(q.discount_rate_used)}
               </td>
             </tr>
+            <tr className="border-t">
+              <td className="py-1">{zh ? "永续增长率" : "Terminal growth"}</td>
+              <td className="py-1 text-right font-mono text-muted-foreground">
+                {q.risk_free_rate != null
+                  ? `${zh ? "无风险利率 " : "risk-free "}${rate(q.risk_free_rate)}`
+                  : zh
+                  ? "旧：固定 2.5%"
+                  : "was fixed 2.5%"}
+              </td>
+              <td className="py-1 text-right font-mono font-medium">
+                {rate(q.terminal_growth_used)}
+              </td>
+            </tr>
+            {q.terminal_value_share != null && (
+              <tr className="border-t">
+                <td className="py-1">{zh ? "终值占现值比重" : "Terminal share of PV"}</td>
+                <td className="py-1 text-right font-mono text-muted-foreground">
+                  {zh ? ">85% 为外推主导" : ">85% = extrapolation-led"}
+                </td>
+                <td
+                  className={`py-1 text-right font-mono font-medium ${
+                    q.terminal_value_share > 0.85 ? "text-amber-600" : ""
+                  }`}
+                >
+                  {rate(q.terminal_value_share)}
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
       )}
@@ -239,6 +278,21 @@ function QualityPanel({ q, locale }: { q: ValuationQuality; locale: string }) {
           {q.earnings_volatility != null &&
             `${zh ? "盈利" : "earnings"} ${q.earnings_volatility.toFixed(2)}`}
           {zh ? " — 波动越大，折现率越高" : " — higher volatility raises the discount rate"}
+        </div>
+      )}
+
+      {!!q.growth_sources?.length && (
+        <div className="text-xs text-muted-foreground leading-relaxed">
+          {zh ? "增长率来源：" : "Growth sources: "}
+          {q.growth_sources.map((g, i) => (
+            <span key={i}>
+              {i > 0 && " · "}
+              <span className={g.forward ? "text-primary" : ""}>
+                {g.label} {(g.value * 100).toFixed(1)}%
+                {g.forward ? (zh ? "（前瞻）" : " (fwd)") : ""}
+              </span>
+            </span>
+          ))}
         </div>
       )}
 

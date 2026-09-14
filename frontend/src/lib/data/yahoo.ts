@@ -151,3 +151,40 @@ export async function searchYahoo(
     return [];
   }
 }
+
+/**
+ * 10-year US Treasury yield, as a decimal.
+ *
+ * Used as the perpetual growth rate and the CAPM risk-free rate. Terminal
+ * growth above the risk-free rate implies the company eventually outgrows the
+ * economy forever, which is why the standard convention caps it there — and
+ * why a hard-coded 2.5% is not neutral when the 10-year sits near 4%: it is
+ * a permanent haircut on every terminal value.
+ *
+ * ^TNX has been quoted both as a percentage (4.25) and as percentage x 10
+ * (42.5) across data revisions, so both forms are normalized and anything
+ * outside a plausible band falls back to the default.
+ */
+const RISK_FREE_FALLBACK = 0.04;
+let riskFreeCache: { value: number; ts: number } | undefined;
+const RISK_FREE_TTL_MS = 6 * 60 * 60 * 1000;
+
+export async function getRiskFreeRate(): Promise<number> {
+  if (riskFreeCache && Date.now() - riskFreeCache.ts < RISK_FREE_TTL_MS) {
+    return riskFreeCache.value;
+  }
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const q: any = await yahooFinance.quote("^TNX");
+    let raw = q?.regularMarketPrice;
+    if (typeof raw !== "number" || !isFinite(raw)) return RISK_FREE_FALLBACK;
+    if (raw > 20) raw = raw / 10; // legacy "yield x 10" form
+    if (raw < 1.5 || raw > 8) return RISK_FREE_FALLBACK;
+    const value = Math.round((raw / 100) * 10000) / 10000;
+    riskFreeCache = { value, ts: Date.now() };
+    return value;
+  } catch (error) {
+    console.error("[Yahoo] Risk-free rate fetch failed:", error);
+    return RISK_FREE_FALLBACK;
+  }
+}

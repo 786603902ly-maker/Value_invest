@@ -71,6 +71,8 @@ interface Scenario {
   earningsGrowthTTM: number;
   revenueGrowthTTM: number;
   analystLongTermGrowth?: number;
+  /** Levered beta, as Alpha Vantage supplies it in production. */
+  beta: number;
   price: number;
 }
 
@@ -90,6 +92,7 @@ const SCENARIOS: Scenario[] = [
     earningsGrowthTTM: 0.18,
     revenueGrowthTTM: 0.2,
     analystLongTermGrowth: 0.16,
+    beta: 1.15,
     price: 650,
   },
   {
@@ -108,6 +111,7 @@ const SCENARIOS: Scenario[] = [
     earningsGrowthTTM: -0.42,
     revenueGrowthTTM: 0.2,
     analystLongTermGrowth: 0.15,
+    beta: 1.1,
     price: 650,
   },
   {
@@ -124,6 +128,7 @@ const SCENARIOS: Scenario[] = [
     ttm: { revenue: 96, ocfMargin: 0.18, capexIntensity: 0.08, netMargin: 0.07 },
     earningsGrowthTTM: -0.2,
     revenueGrowthTTM: -0.03,
+    beta: 1.0,
     price: 60,
   },
   {
@@ -141,6 +146,7 @@ const SCENARIOS: Scenario[] = [
     earningsGrowthTTM: 0.08,
     revenueGrowthTTM: 0.08,
     analystLongTermGrowth: 0.08,
+    beta: 0.9,
     price: 200,
   },
   {
@@ -159,6 +165,7 @@ const SCENARIOS: Scenario[] = [
     earningsGrowthTTM: 0.14,
     revenueGrowthTTM: 0.15,
     analystLongTermGrowth: 0.16,
+    beta: 1.05,
     price: 495,
   },
   {
@@ -176,6 +183,7 @@ const SCENARIOS: Scenario[] = [
     earningsGrowthTTM: 0.9,
     revenueGrowthTTM: 0.1,
     analystLongTermGrowth: 0.12,
+    beta: 1.5,
     price: 110,
   },
 ];
@@ -212,6 +220,8 @@ function runPipeline(sc: Scenario, useHistory: boolean) {
     bvps: (sc.ttm.revenue * 1.2 * B) / SHARES,
     sharesOutstanding: SHARES,
     netDebt: -15 * B,
+    beta: sc.beta,
+    riskFreeRate: 0.04,
     earningsGrowthTTM: sc.earningsGrowthTTM,
     revenueGrowthTTM: sc.revenueGrowthTTM,
     analystLongTermGrowth: sc.analystLongTermGrowth,
@@ -352,9 +362,14 @@ for (const sc of SCENARIOS) {
   }
   if (sc.name.startsWith("D")) {
     check(
-      "低波动 → 折现率 ≤ 9.5%",
-      withHist.norm.discountRate <= 0.095,
+      "低 Beta + 低波动 → 折现率 ≤ 8.5%",
+      withHist.norm.discountRate <= 0.085,
       pct(withHist.norm.discountRate)
+    );
+    check(
+      "永续增长率锚定无风险利率而非固定 2.5%",
+      withHist.norm.terminalGrowth >= 0.03,
+      pct(withHist.norm.terminalGrowth)
     );
   }
   if (sc.name.startsWith("F")) {
@@ -377,8 +392,8 @@ for (const sc of SCENARIOS) {
   }
   if (sc.name.startsWith("E")) {
     check(
-      "高波动 → 折现率 ≥ 10.5%",
-      withHist.norm.discountRate >= 0.105,
+      "高 Beta + 高波动 → 折现率 ≥ 11.5%",
+      withHist.norm.discountRate >= 0.115,
       pct(withHist.norm.discountRate)
     );
     check(
