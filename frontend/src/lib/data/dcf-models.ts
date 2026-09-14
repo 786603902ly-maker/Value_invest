@@ -30,6 +30,8 @@ export interface ComputedDCF {
   value: number;
   annotation: DCFAnnotation;
   role: DCFRole;
+  /** Share of present value coming from the terminal value (primary model only). */
+  terminalShare?: number;
   /** Base weight within its own role group, before renormalization. */
   weight: number;
 }
@@ -41,12 +43,13 @@ export interface ComputedDCF {
  * model's opinion.
  */
 export const MODEL_WEIGHTS = {
-  twoStage: 0.34,
-  tenYearFade: 0.18,
-  fiveYearFcf: 0.12,
-  evEbitda: 0.16,
-  external: 0.14, // shared across all third-party DCF values
-  ddm: 0.06,
+  twoStage: 0.32,
+  tenYearFade: 0.17,
+  fiveYearFcf: 0.11,
+  evEbitda: 0.15,
+  earningsDCF: 0.12,
+  external: 0.1, // shared across all third-party DCF values
+  ddm: 0.03,
   // --- floor group (excluded from the central fair value) ---
   conservativeFcf: 0.35,
   earningsPower: 0.3,
@@ -277,6 +280,34 @@ export function fcfDCF10Year(
 }
 
 /**
+ * Earnings-based DCF — the same fade structure, with normalized EPS standing in
+ * for cash flow.
+ *
+ * This exists because free cash flow is not always usable: a company deep in a
+ * capex cycle can report FCF near zero or negative, and every FCF model then
+ * drops out. Without an earnings-driven sibling in the same group, the fair
+ * value falls through to whatever third-party DCFs happen to be available —
+ * which is one vendor's opinion, not a valuation, and in practice produced fair
+ * values a fraction of the share price for profitable, growing companies.
+ *
+ * Earnings are a weaker proxy for owner cash than FCF (they ignore working
+ * capital and capitalise nothing), so this carries less weight than the cash
+ * models and is not the anchor when they are available.
+ */
+export function earningsDCF(
+  eps: number,
+  growthRate: number,
+  opts: { discountRate?: number; terminalGrowthRate?: number } = {}
+): number | undefined {
+  const { discountRate = 0.1, terminalGrowthRate = 0.025 } = opts;
+  if (!(eps > 0)) return undefined;
+  const g = Math.max(-0.1, Math.min(growthRate, 0.3));
+  const result = fadingDcfPV(eps, g, discountRate, terminalGrowthRate, 5, 10);
+  if (!result) return undefined;
+  return round2(result.pv);
+}
+
+/**
  * The EV/EBITDA multiple to value the business at.
  *
  * Preference order:
@@ -377,6 +408,7 @@ export function buildDCFModels(params: BuildDCFParams): ComputedDCF[] {
         value: out.value,
         annotation: "primary",
         role: "value",
+        terminalShare: Math.round(out.terminalShare * 1000) / 1000,
         weight: MODEL_WEIGHTS.twoStage,
       });
     }
@@ -422,6 +454,30 @@ export function buildDCFModels(params: BuildDCFParams): ComputedDCF[] {
         annotation: "authoritative",
         role: "value",
         weight: MODEL_WEIGHTS.fiveYearFcf,
+      });
+    }
+  }
+
+  // Earnings-based DCF — always available for a profitable company, so the
+  // value group can never collapse to third-party DCFs alone.
+  if (params.eps && params.eps > 0 && growthRate != null) {
+    const val = earningsDCF(params.eps, growthRate, {
+      discountRate,
+      terminalGrowthRate: terminalGrowth,
+    });
+    if (val) {
+      push({
+        source: "ValueInvest",
+        model: "盈利折现 DCF (归一化EPS)",
+        methodology: `与现金流模型同结构，以归一化 EPS 为现金代理：1–5 年 ${(growthRate * 100).toFixed(
+          1
+        )}% 增长，6–10 年衰减至 ${(terminalGrowth * 100).toFixed(
+          1
+        )}% | ${rateNote}。EPS 是比 FCF 更弱的所有者现金代理，故权重低于现金流模型`,
+        value: val,
+        annotation: "authoritative",
+        role: "value",
+        weight: MODEL_WEIGHTS.earningsDCF,
       });
     }
   }

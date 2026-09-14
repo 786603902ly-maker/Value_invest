@@ -59,6 +59,10 @@ export interface ValuationQuality {
   years_of_data?: number;
   history_provider?: string;
   model_count?: number;
+  /** Value models that are ours rather than a third party's. */
+  internal_model_count?: number;
+  /** Share of the primary DCF's present value sitting in the terminal value. */
+  terminal_value_share?: number;
   /** (P75 - P25) / median across the reliable model values. */
   dispersion?: number;
   fair_value_low?: number;
@@ -85,6 +89,10 @@ export interface ValuationQuality {
   capex_intensity_ttm?: number;
   capex_intensity_median?: number;
   growth_sources?: { label: string; value: number; forward?: boolean }[];
+  /** Set when PEG and the DCF point in opposite directions, with the reason. */
+  peg_conflict?: string;
+  risk_free_rate?: number;
+  peg_implied_growth?: number;
   adjustments?: string[];
 }
 

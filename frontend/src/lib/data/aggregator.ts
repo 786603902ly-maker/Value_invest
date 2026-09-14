@@ -1,4 +1,4 @@
-import { getYahooData } from "./yahoo";
+import { getYahooData, getRiskFreeRate } from "./yahoo";
 import {
   getDcf,
   getTargetConsensus,
@@ -91,16 +91,25 @@ export function markReliability(values: number[], priceAnchor?: number): boolean
     }
   }
 
-  // Never fail open: keep the three values closest to the median of ALL values.
-  if (flags.filter(Boolean).length < Math.min(3, n)) {
-    const med = medianOf(values)!;
-    const order = values
-      .map((v, i) => ({ i, d: Math.abs(v - med) }))
+  // If the dispersion test was too aggressive, restore the values closest to
+  // the median — but ONLY among those that passed the absolute sanity band.
+  // Resurrecting a value that failed stage 1 would undo the one check that
+  // catches broken data, which is how a third-party DCF an order of magnitude
+  // below the share price ended up setting the fair value.
+  const stage1Pass = values
+    .map((v, i) => ({ v, i }))
+    .filter(({ v }) =>
+      priceAnchor == null || priceAnchor <= 0 ? true : v >= priceAnchor * 0.2 && v <= priceAnchor * 5
+    );
+  if (flags.filter(Boolean).length < Math.min(3, stage1Pass.length)) {
+    const med = medianOf(stage1Pass.map((x) => x.v))!;
+    const keep = stage1Pass
+      .map(({ v, i }) => ({ i, d: Math.abs(v - med) }))
       .sort((a, b) => a.d - b.d)
-      .slice(0, Math.min(3, n))
+      .slice(0, Math.min(3, stage1Pass.length))
       .map((x) => x.i);
     flags.fill(false);
-    for (const i of order) flags[i] = true;
+    for (const i of keep) flags[i] = true;
   }
 
   return flags;
@@ -153,6 +162,30 @@ export function blendFairValue(
   for (const s of floorSources) s.reliable = inSanityBand(s.value);
   for (const s of sources) if (s.role === "reference") s.reliable = true;
 
+  // Third-party DCFs are a cross-check, never the answer. Vendor DCF endpoints
+  // fail in a characteristic way — a near-zero value for a profitable company
+  // whose cash flow shape they mishandle — so if every internal model drops out
+  // the blend must not quietly become "whatever the vendor said". Their combined
+  // weight is capped, and with no internal model surviving they are not used at
+  // all: no fair value is better than a wrong one.
+  const internalReliable = valueSources.filter(
+    (s) => s.reliable !== false && s.annotation !== "external"
+  );
+  const externalReliable = valueSources.filter(
+    (s) => s.reliable !== false && s.annotation === "external"
+  );
+  if (!internalReliable.length) {
+    for (const s of externalReliable) s.reliable = false;
+  } else {
+    const internalWeight = internalReliable.reduce((sum, s) => sum + (s.weight ?? 0), 0);
+    const externalWeight = externalReliable.reduce((sum, s) => sum + (s.weight ?? 0), 0);
+    const cap = internalWeight * (EXTERNAL_WEIGHT_CAP / (1 - EXTERNAL_WEIGHT_CAP));
+    if (externalWeight > cap && externalWeight > 0) {
+      const scale = cap / externalWeight;
+      for (const s of externalReliable) s.weight = (s.weight ?? 0) * scale;
+    }
+  }
+
   const reliableValues = valueSources.filter((s) => s.reliable !== false).map((s) => s.value);
   const fairValue = weightedFairValue(valueSources) ?? safeAvg(reliableValues);
 
@@ -163,6 +196,9 @@ export function blendFairValue(
 
   return { fairValue, floorValue, reliableValues };
 }
+
+/** Third-party DCFs may never exceed this share of the blend. */
+const EXTERNAL_WEIGHT_CAP = 0.2;
 
 function pegSignal(peg?: number): string | undefined {
   if (peg == null) return undefined;
@@ -177,6 +213,7 @@ export async function getFullValuation(symbol: string): Promise<StockValuation> 
   const [
     yahooData,
     history,
+    riskFreeRate,
     fmpDcfList,
     fmpConsensus,
     fmpRating,
@@ -188,6 +225,7 @@ export async function getFullValuation(symbol: string): Promise<StockValuation> 
   ] = await Promise.all([
     getYahooData(symbol),
     getFinancialHistory(symbol),
+    getRiskFreeRate(),
     getDcf(symbol),
     getTargetConsensus(symbol),
     getRating(symbol),
@@ -206,6 +244,21 @@ export async function getFullValuation(symbol: string): Promise<StockValuation> 
     fmpEV?.latest?.enterpriseValue != null && fmpEV?.latest?.marketCap != null
       ? fmpEV.latest.enterpriseValue - fmpEV.latest.marketCap
       : undefined;
+
+  // Forward P/E and PEG are resolved BEFORE normalization, because the growth
+  // they imply is one of the DCF's forward inputs — that is what keeps the PEG
+  // column and the fair value column from contradicting each other.
+  const forwardPE = yahooData.forwardPE ?? avOverview?.forwardPE ?? fmpRatios?.forwardPE;
+  let pegRatio: number | undefined =
+    yahooData.pegRatio ?? avOverview?.pegRatio ?? fmpRatios?.pegRatio ?? fmpKeyMetrics?.pegRatio;
+
+  // PEG = forward P/E / growth%, so forward P/E / PEG recovers the growth the
+  // PEG figure encodes. Bounded because a near-zero PEG would imply absurd growth.
+  let pegImpliedGrowth: number | undefined;
+  if (forwardPE != null && forwardPE > 0 && pegRatio != null && pegRatio > 0.1) {
+    const g = forwardPE / pegRatio / 100;
+    if (isFinite(g) && g > 0 && g < 0.6) pegImpliedGrowth = Math.round(g * 10000) / 10000;
+  }
 
   // --- Through-cycle normalization ---------------------------------------
   // Runs entirely in the REPORTING currency, because every input it derives is
@@ -226,6 +279,8 @@ export async function getFullValuation(symbol: string): Promise<StockValuation> 
     revenueGrowthTTM: yahooData.revenueGrowthRate,
     analystLongTermGrowth: yahooData.analystLongTermGrowth,
     enterpriseValues: fmpEV?.series,
+    riskFreeRate,
+    pegImpliedGrowth,
   });
 
   // --- Currency & ADR adjustment for total-company figures ----------------
@@ -301,6 +356,9 @@ export async function getFullValuation(symbol: string): Promise<StockValuation> 
 
   const priceAnchor = yahooData.currentPrice ?? yahooData.targetMean ?? undefined;
   const { fairValue: dcfAvg, floorValue, reliableValues } = blendFairValue(dcfSources, priceAnchor);
+  const internalModelCount = dcfSources.filter(
+    (s) => s.role === "value" && s.reliable !== false && s.annotation !== "external"
+  ).length;
 
   // --- Target Price sources ----------------------------------------------
   const targetSources: TargetPriceSource[] = [];
@@ -361,18 +419,72 @@ export async function getFullValuation(symbol: string): Promise<StockValuation> 
       : undefined;
 
   const years = normalized.diagnostics.yearsOfData;
+  const terminalShare = computedModels.find((m) => m.annotation === "primary")?.terminalShare;
+  // When almost all of the present value sits in the terminal value, the number
+  // is an extrapolation of an extrapolation: it says more about the perpetual
+  // growth assumption than about the ten years actually forecast. That is worth
+  // flagging even when the models agree with each other.
+  const extrapolationHeavy = terminalShare != null && terminalShare > 0.85;
   let confidence: ValuationQuality["confidence"] = "medium";
-  if (years < 3 || reliableValues.length < 3 || (dispersion != null && dispersion > 1.0)) {
+  if (
+    years < 3 ||
+    reliableValues.length < 3 ||
+    (dispersion != null && dispersion > 1.0) ||
+    !internalModelCount
+  ) {
     confidence = "low";
-  } else if (years >= 5 && reliableValues.length >= 5 && dispersion != null && dispersion < 0.45) {
+  } else if (
+    years >= 5 &&
+    reliableValues.length >= 5 &&
+    dispersion != null &&
+    dispersion < 0.45 &&
+    !extrapolationHeavy
+  ) {
     confidence = "high";
+  }
+  if (extrapolationHeavy && confidence === "high") confidence = "medium";
+
+  // PEG and the fair value are two views of the same company, so a DIRECTION
+  // disagreement is worth surfacing rather than printing both and letting the
+  // reader discover the contradiction. They do legitimately differ — a DCF pays
+  // for capital expenditure and prices risk, PEG does neither — so this names
+  // the likely reason instead of suppressing one of the numbers.
+  let pegConflict: string | undefined;
+  if (pegRatio != null && vsAvgDcf != null) {
+    const pegSaysCheap = pegRatio < 1;
+    const pegSaysRich = pegRatio > 2;
+    const dcfSaysRich = vsAvgDcf > 15;
+    const dcfSaysCheap = vsAvgDcf < -15;
+    const capexHeavy =
+      normalized.diagnostics.capexIntensityTTM != null &&
+      normalized.diagnostics.capexIntensityTTM > 0.12;
+    if (pegSaysCheap && dcfSaysRich) {
+      pegConflict = `PEG ${pegRatio.toFixed(2)} 显示便宜，但 DCF 显示高估 ${vsAvgDcf.toFixed(
+        1
+      )}%。${
+        capexHeavy
+          ? `主要原因是资本密集度：当前资本开支占营收 ${(
+              normalized.diagnostics.capexIntensityTTM! * 100
+            ).toFixed(1)}%，PEG 只看盈利、不扣资本开支，DCF 扣。`
+          : "两者增长假设或风险定价不一致，请查看下方增长率来源明细。"
+      }`;
+    } else if (pegSaysRich && dcfSaysCheap) {
+      pegConflict = `PEG ${pegRatio.toFixed(2)} 显示偏贵，但 DCF 显示低估 ${Math.abs(
+        vsAvgDcf
+      ).toFixed(1)}%。通常是现金流显著好于会计盈利，或折现率偏低所致。`;
+    }
   }
 
   const valuationQuality: ValuationQuality = {
     confidence,
+    peg_conflict: pegConflict,
+    risk_free_rate: riskFreeRate,
+    peg_implied_growth: pegImpliedGrowth,
     years_of_data: years,
     history_provider: normalized.diagnostics.historyProvider,
     model_count: reliableValues.length,
+    internal_model_count: internalModelCount,
+    terminal_value_share: terminalShare,
     dispersion: dispersion != null ? Math.round(dispersion * 100) / 100 : undefined,
     fair_value_low: p25 != null ? Math.round(p25 * 100) / 100 : undefined,
     fair_value_high: p75 != null ? Math.round(p75 * 100) / 100 : undefined,
@@ -398,10 +510,6 @@ export async function getFullValuation(symbol: string): Promise<StockValuation> 
     adjustments: normalized.diagnostics.adjustments,
   };
 
-  const forwardPE = yahooData.forwardPE ?? avOverview?.forwardPE ?? fmpRatios?.forwardPE;
-
-  let pegRatio: number | undefined =
-    yahooData.pegRatio ?? avOverview?.pegRatio ?? fmpRatios?.pegRatio ?? fmpKeyMetrics?.pegRatio;
   if (pegRatio == null && forwardPE != null && normalized.growthRate != null) {
     const growthPct = normalized.growthRate * 100;
     if (growthPct > 0) {
