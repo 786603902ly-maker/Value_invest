@@ -8,6 +8,7 @@
  *
  * Run: npx tsx scripts/valuation-selftest.ts
  */
+import { twoStageDCF } from "../src/lib/data/dcf-models";
 import { normalizeInputs } from "../src/lib/data/normalize";
 import { buildDCFModels } from "../src/lib/data/dcf-models";
 import { blendFairValue } from "../src/lib/data/aggregator";
@@ -262,6 +263,46 @@ function check(label: string, ok: boolean, detail: string) {
   console.log(`   ${ok ? "PASS" : "FAIL"}  ${label} — ${detail}`);
 }
 
+/**
+ * Calibration guard on the core model.
+ *
+ * This is pure arithmetic on the model structure — one share, one unit of free
+ * cash flow, no company data. It pins the multiple of current free cash flow
+ * the two-stage DCF is willing to pay at a given growth and discount rate, so a
+ * later parameter change cannot quietly re-rate every stock on the page.
+ *
+ * The band is set from the published growth DCFs the user compared against:
+ * they value a business at roughly 55-65x its current free cash flow under
+ * these assumptions. Below the band the model is systematically marking down
+ * growth; above it, the terminal assumption is doing too much of the work.
+ */
+function calibration() {
+  console.log("\n=== 核心模型校准（纯结构算术，无公司数据） ===");
+  const cases: { g: number; r: number; tg: number; lo: number; hi: number }[] = [
+    { g: 0.25, r: 0.09, tg: 0.03, lo: 52, hi: 65 },
+    { g: 0.15, r: 0.09, tg: 0.03, lo: 30, hi: 38 },
+    { g: 0.08, r: 0.09, tg: 0.03, lo: 19, hi: 26 },
+  ];
+  for (const c of cases) {
+    const out = twoStageDCF(1, c.g, 1, {
+      discountRate: c.r,
+      terminalGrowthRate: c.tg,
+    });
+    const mult = out?.value ?? 0;
+    console.log(
+      `   g=${(c.g * 100).toFixed(0)}% r=${(c.r * 100).toFixed(1)}% tg=${(c.tg * 100).toFixed(
+        1
+      )}%  →  ${mult.toFixed(1)}× FCF   终值占比 ${((out?.terminalShare ?? 0) * 100).toFixed(0)}%`
+    );
+    check(
+      `倍数落在 ${c.lo}–${c.hi}× 区间 (g=${(c.g * 100).toFixed(0)}%)`,
+      mult >= c.lo && mult <= c.hi,
+      `${mult.toFixed(1)}×`
+    );
+  }
+}
+calibration();
+
 for (const sc of SCENARIOS) {
   const withHist = runPipeline(sc, true);
   const ttmOnly = runPipeline(sc, false);
@@ -375,8 +416,8 @@ for (const sc of SCENARIOS) {
   if (sc.name.startsWith("F")) {
     const ratio = withHist.anchor ? (withHist.fair ?? 0) / withHist.anchor : 0;
     check(
-      "加权结果贴近核心 DCF 锚（0.85–1.15×）",
-      ratio >= 0.85 && ratio <= 1.15,
+      "加权结果贴近核心 DCF 锚（0.88–1.12×）",
+      ratio >= 0.88 && ratio <= 1.12,
       `ratio=${ratio.toFixed(3)}`
     );
     check(

@@ -559,11 +559,19 @@ export function normalizeInputs(params: NormalizeParams): NormalizedInputs {
       }
     }
     if (multiples.length >= 3) {
-      historicalEvEbitda = Math.round(median(multiples)! * 100) / 100;
+      // The last five years, not the last ten. A business that has re-rated —
+      // a new product cycle, an acquisition that changed the mix — has a
+      // ten-year median drawn largely from the company it used to be, and
+      // valuing it on that is a markdown with no stated reason. Five years is
+      // long enough to span a cycle and short enough to describe the business
+      // as it is now, which is the same window the margin normalization uses
+      // for its recent-regime check.
+      const recent = multiples.slice(-5);
+      historicalEvEbitda = Math.round(median(recent)! * 100) / 100;
       adjustments.push(
-        `EV/EBITDA 乘数取该公司自身 ${multiples.length} 年历史中位数 ${historicalEvEbitda.toFixed(
+        `EV/EBITDA 乘数取该公司自身近 ${recent.length} 年历史中位数 ${historicalEvEbitda.toFixed(
           1
-        )}×，而非固定行业乘数`
+        )}×（不用更长窗口，避免按"它过去是什么"定价），而非固定行业乘数`
       );
     }
   }
