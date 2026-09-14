@@ -43,18 +43,29 @@ export interface ComputedDCF {
  * model's opinion.
  */
 export const MODEL_WEIGHTS = {
-  twoStage: 0.32,
-  tenYearFade: 0.17,
-  fiveYearFcf: 0.11,
-  evEbitda: 0.15,
-  earningsDCF: 0.12,
-  external: 0.1, // shared across all third-party DCF values
-  ddm: 0.03,
+  // The discounted-cash-flow family carries ~75% of the value group.
+  //
+  // Calibration check: at 25% growth, a 9% discount rate and 3% perpetual
+  // growth, the two-stage model values a business at 57.6x its current free
+  // cash flow — within a few percent of what the published growth DCFs imply.
+  // The anchor was never the problem. The blend was: at the previous weights
+  // it landed at 0.78x the anchor, so a well-calibrated model was being marked
+  // down by a fifth before it reached the page.
+  twoStage: 0.48,
+  tenYearFade: 0.27,
+  evEbitda: 0.1,
+  external: 0.07, // shared across all third-party DCF values
+  ddm: 0.04,
+  /** Weight for the earnings DCF when cash-flow models are available. */
+  earningsDCFSecondary: 0.04,
+  /** Weight when it is the only going-concern model left. */
+  earningsDCFPrimary: 0.55,
   // --- floor group (excluded from the central fair value) ---
-  conservativeFcf: 0.35,
-  earningsPower: 0.3,
-  residualIncome: 0.25,
-  grahamNumber: 0.1,
+  conservativeFcf: 0.3,
+  fiveYearFcf: 0.2,
+  earningsPower: 0.25,
+  residualIncome: 0.17,
+  grahamNumber: 0.08,
   // --- reference only (excluded from both) ---
   grahamFormula: 0,
   lynch: 0,
@@ -328,9 +339,10 @@ export function fairEvEbitdaMultiple(opts: {
 }): number {
   const { historicalMedian, growthRate, volatility } = opts;
   if (historicalMedian != null && isFinite(historicalMedian) && historicalMedian > 0) {
-    // Trim the historical median slightly so a decade-long re-rating does not
-    // get extrapolated forever.
-    return Math.min(25, Math.max(5, historicalMedian * 0.9));
+    // No trim. The 10% haircut that used to sit here was an unexplained
+    // markdown on top of an already-conservative input — the median of a window
+    // that includes the company's worst years.
+    return Math.min(25, Math.max(5, historicalMedian));
   }
   const g = Math.max(0, Math.min(growthRate ?? 0, 0.3));
   let multiple = 8 + 40 * g; // 0% growth -> 8x, 15% -> 14x, 30% -> 20x
@@ -436,30 +448,18 @@ export function buildDCFModels(params: BuildDCFParams): ComputedDCF[] {
     }
   }
 
-  // 5-year FCF DCF — shortest explicit horizon in the value group.
-  if (hasFcf && hasShares && growthRate != null) {
-    const val = fcfDCF(
-      params.freeCashflow!,
-      growthRate,
-      params.sharesOutstanding!,
-      discountRate,
-      terminalGrowth
-    );
-    if (val) {
-      push({
-        source: "ValueInvest",
-        model: "5年 FCF DCF",
-        methodology: `5年现金流折现 + Gordon 终值 | ${rateNote}，终值增长 ${(terminalGrowth * 100).toFixed(1)}%`,
-        value: val,
-        annotation: "authoritative",
-        role: "value",
-        weight: MODEL_WEIGHTS.fiveYearFcf,
-      });
-    }
-  }
-
-  // Earnings-based DCF — always available for a profitable company, so the
-  // value group can never collapse to third-party DCFs alone.
+  // Earnings-based DCF — a fallback, not a co-equal.
+  //
+  // It exists so the value group can never collapse to third-party DCFs when
+  // free cash flow is unusable. But running it at a meaningful weight ALONGSIDE
+  // the cash models marks down every company whose GAAP earnings sit below its
+  // cash flow — an acquisitive business carrying large purchase amortisation is
+  // the standard case, and the amortisation is a non-cash charge the cash models
+  // correctly ignore. So it carries almost nothing when the cash models are
+  // present, and takes over when they are not.
+  const fcfModelsAvailable = results.some(
+    (m) => m.role === "value" && m.source === "ValueInvest" && m.model.includes("FCF")
+  ) || results.some((m) => m.annotation === "primary");
   if (params.eps && params.eps > 0 && growthRate != null) {
     const val = earningsDCF(params.eps, growthRate, {
       discountRate,
@@ -469,7 +469,7 @@ export function buildDCFModels(params: BuildDCFParams): ComputedDCF[] {
       push({
         source: "ValueInvest",
         model: "盈利折现 DCF (归一化EPS)",
-        methodology: `与现金流模型同结构，以归一化 EPS 为现金代理：1–5 年 ${(growthRate * 100).toFixed(
+        methodology: `与现金流模型同结构，以归一化 EPS 为现金代理（现金流模型可用时仅作交叉验证，权重 4%；不可用时接管）：1–5 年 ${(growthRate * 100).toFixed(
           1
         )}% 增长，6–10 年衰减至 ${(terminalGrowth * 100).toFixed(
           1
@@ -477,7 +477,9 @@ export function buildDCFModels(params: BuildDCFParams): ComputedDCF[] {
         value: val,
         annotation: "authoritative",
         role: "value",
-        weight: MODEL_WEIGHTS.earningsDCF,
+        weight: fcfModelsAvailable
+          ? MODEL_WEIGHTS.earningsDCFSecondary
+          : MODEL_WEIGHTS.earningsDCFPrimary,
       });
     }
   }
@@ -501,9 +503,7 @@ export function buildDCFModels(params: BuildDCFParams): ComputedDCF[] {
         model: "EV/EBITDA 乘数估值",
         methodology:
           params.historicalEvEbitda != null
-            ? `归一化 EBITDA × ${multiple.toFixed(1)}×（该公司自身近十年 EV/EBITDA 中位数 ${params.historicalEvEbitda.toFixed(
-                1
-              )}× 打9折），扣减净负债`
+            ? `归一化 EBITDA × ${multiple.toFixed(1)}×（该公司自身近 5 年 EV/EBITDA 中位数），扣减净负债`
             : `归一化 EBITDA × ${multiple.toFixed(1)}×（按增长率推算，无历史乘数可用），扣减净负债`,
         value: val,
         annotation: "classic",
@@ -551,6 +551,31 @@ export function buildDCFModels(params: BuildDCFParams): ComputedDCF[] {
         annotation: "conservative",
         role: "floor",
         weight: MODEL_WEIGHTS.conservativeFcf,
+      });
+    }
+  }
+
+  // Truncating the forecast at five years and applying Gordon immediately is
+  // not an independent view of value — it is the same model with the growth
+  // phase cut short, so it always lands below the ten-year version (72% of it
+  // at 25% growth). That makes it a downside case, not a second opinion.
+  if (hasFcf && hasShares && growthRate != null) {
+    const val = fcfDCF(
+      params.freeCashflow!,
+      growthRate,
+      params.sharesOutstanding!,
+      discountRate,
+      terminalGrowth
+    );
+    if (val) {
+      push({
+        source: "ValueInvest",
+        model: "5年 FCF DCF (截断增长期)",
+        methodology: `仅 5 年现金流折现 + Gordon 终值 | ${rateNote} — 增长期被截断，系统性低于10年版，计入安全边际下限`,
+        value: val,
+        annotation: "conservative",
+        role: "floor",
+        weight: MODEL_WEIGHTS.fiveYearFcf,
       });
     }
   }
